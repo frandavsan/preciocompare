@@ -312,8 +312,6 @@ These rules apply in every session without waiting for user instruction:
 **After writing code:**
 - After writing or significantly modifying any file, invoke the `simplify` skill autonomously to review it for quality and efficiency. Do not skip this step.
 
-**Before starting multi-file tasks:**
-- Before any task that touches more than 2 files, spawn a `Plan` agent to design the approach first. Only proceed to implementation after the plan is reviewed.
 
 **When exploring the codebase:**
 - Whenever a task requires reading more than 3 files or doing open-ended search, spawn an `Explore` agent instead of reading files directly. This protects main context.

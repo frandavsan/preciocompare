@@ -30,22 +30,28 @@ def _db():
         conn.close()
 
 
-async def search_products(query: str, detail: bool = False) -> dict[str, list[ProductResult]]:
+async def search_products(
+    query: str, detail: bool = False, use_cache: bool = True
+) -> dict[str, list[ProductResult]]:
     """
-    Returns results for every store, using cache when available.
+    Returns results for every store.
 
-    Known query (searched before): served entirely from DB.
-    New query: live fetch + per-product deduplication + cache write.
+    use_cache=True (default for API): serve from DB for known queries; live fetch + insert for new ones.
+    use_cache=False (default for CLI): always fetch live, upsert fresh data to DB.
 
     Concurrent requests for the same (store, query) are serialized via per-key
     asyncio locks — the second waiter re-checks cache inside the lock and skips
     the live fetch if the first request already populated it.
     """
     with _db() as conn:
-        cached_stores = [a for a in ADAPTERS if cache.has_query(conn, a.name, query)]
-        new_stores    = [a for a in ADAPTERS if not cache.has_query(conn, a.name, query)]
+        if use_cache:
+            cached_stores = [a for a in ADAPTERS if cache.has_query(conn, a.name, query)]
+            new_stores    = [a for a in ADAPTERS if a not in cached_stores]
+        else:
+            cached_stores = []
+            new_stores = list(ADAPTERS)
 
-        all_results: dict = {}
+        all_results: dict[str, list[ProductResult]] = {}
 
         # Cached stores: instant DB lookup
         for adapter in cached_stores:
@@ -57,30 +63,34 @@ async def search_products(query: str, detail: bool = False) -> dict[str, list[Pr
                 key = _lock_key(adapter.name, query)
                 async with _query_locks[key]:
                     # Re-check cache inside the lock — another request may have filled it.
-                    if cache.has_query(conn, adapter.name, query):
+                    if use_cache and cache.has_query(conn, adapter.name, query):
                         all_results[adapter.name] = cache.get_query_products(
                             conn, adapter.name, query
                         )
                         continue
 
-                    # Still a miss — do the live scrape.
                     live = await search_all_stores(query, [adapter], detail=detail)
                     live_results = live.get(adapter.name, [])
 
-                    # Build final result list: use DB version for existing products,
-                    # live version for products not yet in the DB.
-                    final: list = []
-                    new_products: list = []
-                    for r in live_results:
-                        existing = cache.get_product_by_url(conn, adapter.name, r.url)
-                        if existing is not None:
-                            final.append(existing)
-                        else:
-                            final.append(r)
-                            new_products.append(r)
-
-                    if new_products:
-                        cache.insert_new_products(conn, adapter.name, new_products)
+                    if use_cache:
+                        # Preserve richer cached data: use DB version for existing products,
+                        # live version for products not yet in the DB.
+                        final: list = []
+                        new_products: list = []
+                        for r in live_results:
+                            existing = cache.get_product_by_url(conn, adapter.name, r.url)
+                            if existing is not None:
+                                final.append(existing)
+                            else:
+                                final.append(r)
+                                new_products.append(r)
+                        if new_products:
+                            cache.insert_new_products(conn, adapter.name, new_products)
+                    else:
+                        # Live mode: show fresh data, overwrite DB with latest prices.
+                        final = live_results
+                        if final:
+                            cache.upsert_products(conn, adapter.name, final)
 
                     # Only record the query if it returned results — a live fetch that
                     # returns nothing may indicate a transient error and should not be

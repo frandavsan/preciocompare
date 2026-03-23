@@ -9,7 +9,11 @@ def format_price(price: Optional[float]) -> str:
     return f"{round(price):,}".replace(",", ".")
 
 
-def print_results(query: str, all_results: dict[str, list[ProductResult]]) -> None:
+def print_results(
+    query: str,
+    all_results: dict[str, list[ProductResult]],
+    limit: Optional[int] = None,
+) -> None:
     width = 68
     line = "-" * width
 
@@ -21,10 +25,13 @@ def print_results(query: str, all_results: dict[str, list[ProductResult]]) -> No
             print(f"  {store.upper()}  —  no results found")
             continue
 
-        print(f"  {store.upper()}  ({len(products)} result{'s' if len(products) != 1 else ''})")
+        n = len(products)
+        shown = products[:limit] if limit and n > limit else products
+        header = f"showing {limit} of {n}" if limit and n > limit else f"{n} result{'s' if n != 1 else ''}"
+        print(f"  {store.upper()}  ({header})")
         print(line)
 
-        for i, r in enumerate(products, 1):
+        for i, r in enumerate(shown, 1):
             print(f"  {i}. {r.name}")
             print(f"     SKU      : {r.sku or 'N/A'}")
             print(f"     Price    : {format_price(r.price)}")
@@ -39,7 +46,10 @@ def print_results(query: str, all_results: dict[str, list[ProductResult]]) -> No
             print(f"     Free shipping: {r.free_shipping}")
             print(f"     International: {r.international}")
             print(f"     URL      : {r.url}")
-            if i < len(products):
+            if i < len(shown):
                 print()
+
+        if limit and n > limit:
+            print(f"\n  ... and {n - limit} more result{'s' if n - limit != 1 else ''}")
 
     print(line + "\n")
