@@ -41,10 +41,6 @@ class FravegaAdapter(StoreAdapter):
     base_url: str
     verify_ssl: bool = True
     postal_code: str = "1425"
-    # Caps concurrent GQL requests to avoid overwhelming the server.
-    # Benchmark shows Semaphore(40) is ~2.4× faster than unlimited for
-    # queries with 100+ products (113 requests: 17s unlimited vs 7s capped).
-    _gql_semaphore: asyncio.Semaphore = asyncio.Semaphore(40)
 
     @property
     def _endpoint(self) -> str:
@@ -86,7 +82,7 @@ class FravegaAdapter(StoreAdapter):
             if detail and sku_code:
                 detail_tasks.append((idx, sku_code))
 
-        async def _apply_shipping():
+        if shipping_tasks:
             shipping_results = await asyncio.gather(*[
                 self._fetch_free_shipping(sku, seller_id)
                 for _, sku, seller_id in shipping_tasks
@@ -94,7 +90,7 @@ class FravegaAdapter(StoreAdapter):
             for (idx, _, _), is_free in zip(shipping_tasks, shipping_results):
                 results[idx].free_shipping = is_free
 
-        async def _apply_plans():
+        if detail_tasks:
             plans_list = await asyncio.gather(*[
                 self._fetch_plans(sku) for _, sku in detail_tasks
             ])
@@ -106,12 +102,6 @@ class FravegaAdapter(StoreAdapter):
                             inst.amount = round(price / inst.count, 2)
                     results[idx].installments = plans
 
-        concurrent = []
-        if shipping_tasks:
-            concurrent.append(_apply_shipping())
-        if detail_tasks:
-            concurrent.append(_apply_plans())
-        await asyncio.gather(*concurrent)
         return results
 
     async def _fetch_all_products(self, query: str) -> list[dict]:
@@ -146,9 +136,8 @@ class FravegaAdapter(StoreAdapter):
         """Posts a GraphQL query to the Fravega endpoint with one retry on transient failure."""
         for attempt in range(2):
             try:
-                async with self._gql_semaphore:
-                    resp = await _session.post(self._endpoint, json={"query": gql}, verify=self.verify_ssl)
-                    resp.raise_for_status()
+                resp = await _session.post(self._endpoint, json={"query": gql}, verify=self.verify_ssl)
+                resp.raise_for_status()
                 return resp.json()
             except Exception:
                 if attempt == 0:
@@ -214,21 +203,14 @@ class FravegaAdapter(StoreAdapter):
         Mirrors how Fravega's website groups interest-free installment options:
 
         - Card networks (Visa, Mastercard, etc.) are shown at their "base" count —
-          the max sin-interés count from generic no-issuer rows of that network —
-          UNLESS all of that network's named issuers cap at or below the generic max
-          (meaning no issuer ever exceeds it). In that case the issuers own the deal
-          and the network label is suppressed.
-          When at least one issuer exceeds the generic, the generic level is a genuine
-          network-wide baseline and the label is kept.
+          the max sin-interés count from generic no-issuer rows of that network.
         - An issuer (e.g. "Banco Nación") is shown at its own max count only when
           that count *exceeds* the base count of every network it appears under,
           meaning the issuer is the one offering an exclusive better deal.
 
-        Example: Visa generic → 12x; Santander/BBVA/BNA offer 15x, Macro offers 12x.
-                 → Visa shown at 12x (an issuer exceeds generic → network is real baseline).
-                 AmEx generic → 12x; Banco Galicia/Macro/Amex Prop all offer exactly 12x.
-                 → AmEx NOT shown (no issuer exceeds generic → issuers own the deal).
-                 Cabal + Credicoop → 12x, but Cabal has no generic row (base=0) → not shown.
+        Example: Visa generic → 6x (shown as Visa at 6x).
+                 Visa + BNA → 12x (shown as BNA at 12x, because 12 > 6).
+                 Visa + BBVA → 6x (not shown separately, already covered by Visa at 6x).
 
         Amount is set to 0.0; caller sets price / count after receiving the list.
         """
@@ -254,29 +236,12 @@ class FravegaAdapter(StoreAdapter):
                 if count > issuer_max.get(issuer_name, 0):
                     issuer_max[issuer_name] = count
 
-        # Precompute: system → max issuer cap (sin-interés) across all named issuers.
-        # A network label is suppressed when it has named issuers AND none of them
-        # exceed the generic baseline — meaning the issuers own the deal, not the
-        # network broadly. An issuer at the same count as the generic does NOT trigger
-        # suppression if another issuer for the same network goes higher.
-        system_max_issuer_cap: dict[str, int] = {}
-        issuer_max_base: dict[str, int] = {}
-        for issuer, syss in issuer_systems.items():
-            cap = issuer_max[issuer]
-            base = max((system_base.get(s, 0) for s in syss), default=0)
-            issuer_max_base[issuer] = base
-            for s in syss:
-                if cap > system_max_issuer_cap.get(s, 0):
-                    system_max_issuer_cap[s] = cap
-
         groups: dict[int, list[str]] = {}
         for system, count in system_base.items():
-            max_cap = system_max_issuer_cap.get(system, 0)
-            if max_cap == 0 or max_cap > count:
-                groups.setdefault(count, []).append(system)
+            groups.setdefault(count, []).append(system)
         for issuer, count in issuer_max.items():
-            max_base = issuer_max_base[issuer]
-            if max_base > 0 and count > max_base:
+            max_base = max((system_base.get(s, 0) for s in issuer_systems[issuer]), default=0)
+            if count > max_base:
                 groups.setdefault(count, []).append(issuer)
 
         return [
