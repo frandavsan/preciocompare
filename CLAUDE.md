@@ -22,18 +22,28 @@ The program can also be run as a module: `python -m electrodomestics_bot`
 ```
 ElectrodomesticsBot/
 ├── run.py                              ← entry point (thin wrapper)
+├── refresh.py                          ← entry point for background cache refresh job
+├── bench/                              ← benchmarks and one-off debug scripts (not production)
+│   ├── bench_fravega.py                ← Fravega timing benchmark (unlimited vs semaphored concurrency)
+│   ├── bench_ps5.py                    ← multi-store diagnostic benchmark for broad queries
+│   ├── analyze_plans.py                ← offline analysis of Fravega plans API response
+│   └── fetch_fravega_plans.py          ← one-off script to fetch raw plans GQL from Fravega
 └── electrodomestics_bot/
     ├── __main__.py                     ← CLI: reads input, calls search, prints results
     ├── core.py                         ← http_get(), matches_query(), search_all_stores()
     ├── models.py                       ← ProductResult and Installment dataclasses
     ├── display.py                      ← formats and prints results to terminal
+    ├── service.py                      ← search_products(): cache + live fetch, all stores in parallel
+    ├── cache.py                        ← SQLite cache: products, queries, upsert/insert logic
     ├── platforms/                      ← INFRASTRUCTURE LAYER
+    │   ├── fravega.py                  ← All Fravega Next.js + Apollo GraphQL logic
     │   ├── magento.py                  ← All Magento 2 + Summa Solutions logic
     │   └── vtex.py                     ← All VTEX Intelligent Search logic
     └── adapters/                       ← STORE LAYER
         ├── base.py                     ← StoreAdapter ABC
         ├── __init__.py                 ← ADAPTERS list (edit this to add/remove stores)
         ├── cetrogar.py                 ← CetrogarAdapter(MagentoAdapter) — 5 lines
+        ├── fravega.py                  ← FravegaStoreAdapter(FravegaAdapter) — 5 lines
         └── oncity.py                   ← OncityAdapter(VtexAdapter) — 5 lines
 ```
 
@@ -60,14 +70,28 @@ ElectrodomesticsBot/
 | Store | Platform | Adapter | Notes |
 |---|---|---|---|
 | Cetrogar | Magento 2 + Summa Solutions | `adapters/cetrogar.py` | |
+| Fravega | Custom Next.js + Apollo GraphQL | `adapters/fravega.py` | Uses `curl_cffi` for Cloudflare bypass |
 | OnCity | VTEX Intelligent Search | `adapters/oncity.py` | `verify_ssl=False` due to cert issue |
 
 ## Platform Details
 
+### Fravega (`platforms/fravega.py`)
+- Custom Next.js + Apollo GraphQL stack; **not** VTEX, Magento, or Shopify
+- **HTTP client:** must use `curl_cffi` (`AsyncSession(impersonate="chrome120")`) — standard `httpx`/`aiohttp`/`requests` get blocked by Cloudflare. The session is module-level and shared across all calls.
+- Search endpoint: `POST /api/v1/rest/search` (GraphQL, no build hash in the URL — stable)
+- Pagination: offset-based, 50 results/page, capped at 10 pages (500 results); extra pages fetched in parallel via `asyncio.gather`
+- **Installments (fast mode):** count parsed from label text in the search response (`"12 cuotas sin interés"` → regex `(\d+)\s+cuotas?\s+sin\s+inter`); amount = `price / count`; no card names available
+- **Installments (detail mode):** per-SKU `plans(sku)` GQL query; card networks shown at their max no-interest count from generic (no-issuer) rows; an issuer (e.g. BNA) appears only when its count exceeds the base network count — see `_parse_plans()` docstring
+- **Free shipping:** per-product `calculateDeliveryTermAndCost(sku, seller, postalCode)` GQL query; `cost == 0` means free. Skipped when matched products exceed `_MAX_SHIPPING_CHECKS` (100) — see gotcha #20
+- **Availability:** always `True` — the API only returns listable products
+- **International:** `sellerCondition == ["international_seller"]` in the search response item
+- **GQL concurrency cap:** production adapter uses `asyncio.Semaphore(40)` on `_post_gql` to avoid connection resets under high concurrency
+- **Shipping cache (disabled):** `_SHIPPING_CACHE_ENABLED = False` — TTL-based in-memory dict ready to flip on for v1 launch; see comment block above `_SHIPPING_CACHE_ENABLED` in `platforms/fravega.py`
+
 ### VTEX (`platforms/vtex.py`)
 - Search: `/_v/api/intelligent-search/product_search/?query={}&count=50&page={N}` — paginated, capped at 10 pages (500 results)
-- Pagination: response contains `pagination.count` (total pages); pages fetched in parallel via `ThreadPoolExecutor(max_workers=5)`
-- Shipping simulation: `/api/checkout/pub/orderForms/simulation` (POST), capped at `max_workers=10`; skipped for unavailable products
+- Pagination: response contains `pagination.count` (total pages); extra pages fetched in parallel via `asyncio.gather`
+- Shipping simulation: `/api/checkout/pub/orderForms/simulation` (POST), unlimited concurrency via `asyncio.gather`; skipped for unavailable products
 - Price and installments read from `commertialOffer` in the search response — no extra page fetch needed
 - Multi-seller products: always use `_get_real_seller()` — international/marketplace products have a dummy seller "1" with Price=0 alongside the real seller
 - Availability: `AvailableQuantity > 0` on any seller
@@ -98,11 +122,18 @@ The goal is that adding a new store requires nothing more than declaring its `na
 
 | Feature | Where it lives | Why |
 |---|---|---|
+| Fravega GQL search + pagination | `platforms/fravega.py` | Fravega-platform contract |
+| Fravega installment fast parsing (label text) | `platforms/fravega.py` | Same label format across all Fravega stores |
+| Fravega installment detail (`plans` GQL) | `platforms/fravega.py` | Same GQL schema across all Fravega stores |
+| Fravega free shipping (`calculateDelivery` GQL) | `platforms/fravega.py` | Same GQL schema across all Fravega stores |
+| Fravega international detection (`sellerCondition`) | `platforms/fravega.py` | Same field across all Fravega stores |
+| Fravega shipping threshold + cache | `platforms/fravega.py` | Performance concern affecting all Fravega stores |
 | VTEX price extraction | `platforms/vtex.py` | Standard VTEX API contract |
 | VTEX availability detection | `platforms/vtex.py` | Standard VTEX API contract |
 | VTEX free shipping simulation | `platforms/vtex.py` | Standard VTEX checkout API |
 | VTEX international product detection | `platforms/vtex.py` | Standard VTEX taxonomy fields |
 | VTEX multi-seller / real seller resolution | `platforms/vtex.py` | Standard VTEX API structure |
+| VTEX redirect → legacy API fallback | `platforms/vtex.py` | Redirect behavior is VTEX-platform-wide |
 | Magento 2 price HTML parsing | `platforms/magento.py` | Standard Magento price widget |
 | Summa Solutions installment scraping | `platforms/magento.py` | Scraped from `div.installment-info` on search page (no extra fetches); `_fetch_installments()` available for full card data |
 | Summa card logo filename map | `platforms/magento.py` | Same CDN filenames across all Summa stores (used by `_fetch_installments` only) |
@@ -130,23 +161,35 @@ class NewStoreAdapter(MagentoAdapter):
     base_url = "https://www.newstore.com.ar"
 ```
 
+**Fravega-platform store:**
+```python
+# adapters/newstore.py
+from ..platforms.fravega import FravegaAdapter
+
+class NewStoreAdapter(FravegaAdapter):
+    name = "newstore"
+    base_url = "https://www.newstore.com.ar"
+```
+
 Then add `NewStoreAdapter()` to the `ADAPTERS` list in `adapters/__init__.py`.
 
 ### Overridable class attributes
 
 | Attribute | Default | Platform | When to override |
 |---|---|---|---|
-| `postal_code` | `"1425"` (Buenos Aires) | VTEX | Different delivery region |
-| `verify_ssl` | `True` | VTEX | Store has broken SSL cert |
+| `postal_code` | `"1425"` (Buenos Aires) | VTEX, Fravega | Different delivery region |
+| `verify_ssl` | `True` | VTEX, Fravega | Store has broken SSL cert |
 | `card_keywords` | standard Summa map | Magento | Store uses non-standard card logo filenames |
 
 ## Known Patterns and Gotchas
 
 - **VTEX international products** have two sellers in the API: a dummy `seller="1"` with `Price=0` and `AvailableQuantity=0`, and the real marketplace seller. Always use `_get_real_seller()` — never index `sellers[0]` directly.
-- **Cetrogar installments** require fetching every product page individually. This is inherently slow; parallelism via `ThreadPoolExecutor` is critical.
+- **Cetrogar installments** require fetching every product page individually. This is inherently slow; parallelism via `asyncio.gather` is critical.
 - **`matches_query()`** in `core.py` filters results so that only products containing all query words appear — compensates for stores returning loosely-related suggestions.
 - **SSL warnings** are globally suppressed in `core.py` (`warnings.filterwarnings("ignore")`) because several stores have certificate issues.
 - The `currency` field is hardcoded to `"ARS"` — all stores currently in scope are Argentine.
+- **Fravega shipping is the dominant bottleneck**: broad queries (e.g., brand-only searches) return hundreds of products, each needing a GQL shipping call averaging ~14s. Wall time = slowest single call (~27s). Queries exceeding `_MAX_SHIPPING_CHECKS` skip shipping entirely (all products get `free_shipping=False`).
+- **All stores are searched in parallel** via `asyncio.gather` in `service.py` — total response time ≈ slowest single store, not the sum.
 
 ---
 
@@ -281,6 +324,56 @@ When the Magento search returns no matches, the HTML page contains the string `c
 #### 17. Magento stores may have genuine search gaps for natural-language queries
 
 Cetrogar's search engine (and likely others) indexes product names and SKUs, not natural-language descriptions. Queries like "55 pulgadas" or "television" return zero results on Cetrogar because the catalog uses "televisor" and "UN55..." style naming. This is expected and correct — the tool is designed for model/SKU searches. Do not treat 0 results as evidence of a scraping bug without first verifying on the store's own website.
+
+---
+
+### Fravega (`platforms/fravega.py`)
+
+#### 18. Fravega requires `curl_cffi` — standard HTTP clients get Cloudflare-blocked
+
+Fravega's CDN applies Cloudflare bot protection. `httpx`, `aiohttp`, and `requests` are blocked with 403 or 503 responses. The only client that works reliably is `curl_cffi.requests.AsyncSession(impersonate="chrome120")`, which mimics a real browser's TLS fingerprint.
+
+The session is a module-level singleton (`_session`) shared across all calls to avoid per-call TLS handshake overhead. Do not instantiate a new session per request or per adapter instance.
+
+#### 19. Fravega's GQL endpoint handles three query types through the same URL
+
+All three operations — product search, shipping calculation, and plans lookup — are POSTed to the same endpoint (`/api/v1/rest/search`) as GraphQL query strings. There is no separate endpoint per operation. When adding new data fields, always use the same `_post_gql()` method and the existing `_endpoint` property.
+
+#### 20. Fravega shipping wall-time grows with result count — skip above threshold
+
+Each matched product requires a separate `calculateDeliveryTermAndCost` GQL call. These run fully concurrently via `asyncio.gather`, so wall time = slowest individual call, not the sum. In practice, single GQL calls average ~14s under load; a broad query returning 365 matches produces a ~27s shipping phase even with unlimited concurrency.
+
+`_MAX_SHIPPING_CHECKS = 100` is the safety valve: if more products match than this threshold, **all** shipping checks are skipped and `free_shipping=False` for all results. This keeps broad queries fast at the cost of missing shipping data. The threshold is intentionally conservative — raise it only after benchmarking the expected P99 call time at the new limit.
+
+#### 21. Fravega `_parse_plans()` mirrors the store's own display logic, not raw API data
+
+The `plans(sku)` GQL returns one row per card network × issuer × installment count combination. The website collapses these into a compact display: networks are shown at their max no-interest count from rows with no issuer; an issuer (e.g., BNA) only appears separately when its count exceeds the base network count, meaning the issuer is offering an exclusive better deal.
+
+`_parse_plans()` replicates this exactly. Do not simplify it to "max count per network" — that would miss issuer-exclusive promotions. Do not include all counts — that would duplicate options the website doesn't show.
+
+#### 22. Fravega `_post_gql` must keep its 2-attempt retry with `asyncio.sleep(2)`
+
+The `_post_gql` method retries once on any exception, sleeping 2 seconds between attempts. This retry is **critical**: under high concurrency (50+ simultaneous GQL calls), Fravega's server sporadically resets connections on the first attempt. Without the retry, those calls fail permanently rather than succeeding on the second try.
+
+If you override `_post_gql` in a subclass (e.g., for benchmarking instrumentation), you must preserve this retry loop. Dropping it causes "Recv failure: Connection was reset" crashes that abort the entire search.
+
+#### 23. Fravega shipping cache is implemented but disabled — flip for v1 launch
+
+`_SHIPPING_CACHE_ENABLED = False` in `platforms/fravega.py`. The cache is a TTL-based in-memory dict keyed on `(sku, seller_id, postal_code)` with a 24-hour expiry. When enabled, it eliminates the ~27s shipping wall-time on repeated queries by returning cached results.
+
+It is left disabled during development so that live shipping data is always fetched and cache bugs cannot mask stale results. **Before going live (v1 launch), set `_SHIPPING_CACHE_ENABLED = True`.**
+
+Note: the cache is process-local (not persisted to DB). It is cleared on restart and does not survive deployments. For a production deployment that restarts frequently, consider persisting shipping results to the SQLite DB instead.
+
+#### 24. Importing `platforms.fravega` directly before `adapters/__init__.py` loads triggers a circular import
+
+The normal import chain is: `service.py` → `adapters/__init__.py` → `adapters/fravega.py` → `platforms/fravega.py`. This works fine.
+
+If you try to `from electrodomestics_bot.platforms.fravega import _session` (or any other symbol) **before** `adapters/__init__.py` has been imported in the same process, Python may encounter a circular import depending on load order. Always import the platform module through the adapter or the standard package entry point, not directly.
+
+#### 25. Fravega search returns all variants under one item — first SKU/seller wins
+
+Unlike VTEX (which returns one item per variant with its own `commertialOffer`), Fravega's search API bundles all SKU variants under a single result. The platform extracts `skus.results[0]` (first SKU) and `sellers[0]` (first seller). In practice this is the primary variant (the one shown by default on the product page), but it may not be the cheapest. This is consistent with how the store displays its own search results.
 
 ---
 

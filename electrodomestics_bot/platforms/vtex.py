@@ -10,6 +10,12 @@ from ..models import Installment, ProductResult
 from ..adapters.base import StoreAdapter
 
 
+# In-process cache of (base_url, quoted_query) pairs known to trigger a VTEX redirect.
+# Populated lazily on first detection; on subsequent calls the ~1.5s wasted intelligent-search
+# round-trip is skipped and the legacy API is called directly.
+_redirect_queries: set[tuple[str, str]] = set()
+
+
 class VtexAdapter(StoreAdapter):
     """
     Base adapter for VTEX Intelligent Search stores.
@@ -71,13 +77,18 @@ class VtexAdapter(StoreAdapter):
     async def _fetch_all_products(self, quoted_query: str) -> list[dict]:
         """Fetches all pages of VTEX product search results (capped at 10 pages / 500 results).
         Falls back to the legacy catalog API when the intelligent search returns a redirect."""
+        # Skip the intelligent search entirely for queries we already know redirect.
+        if (self.base_url, quoted_query) in _redirect_queries:
+            return await self._fetch_all_products_legacy(quoted_query)
+
         base = self.search_url.format(quoted_query)
         data = (await http_get(base, verify_ssl=self.verify_ssl)).json()
         products = data.get("products", [])
 
         # Intelligent search may redirect brand/model queries to category pages.
-        # Fall back to the legacy catalog search API, which ignores redirects.
+        # Cache the redirect so future calls skip the wasted round-trip.
         if not products and data.get("redirect"):
+            _redirect_queries.add((self.base_url, quoted_query))
             return await self._fetch_all_products_legacy(quoted_query)
 
         total_pages = min(data.get("pagination", {}).get("count", 1), 10)

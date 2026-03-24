@@ -8,7 +8,7 @@ duplicated — super().search() is called directly so the benchmark stays
 in sync with any future changes to the platform logic.
 
 Run from the project root:
-    python bench_fravega.py
+    python bench/bench_fravega.py
 """
 
 import asyncio

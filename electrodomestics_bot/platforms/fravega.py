@@ -5,6 +5,7 @@ import asyncio
 import logging
 import math
 import re
+import time
 from typing import Optional
 
 from curl_cffi.requests import AsyncSession
@@ -20,6 +21,26 @@ logger = logging.getLogger(__name__)
 _PAGE_SIZE = 50
 _MAX_PAGES = 10
 _INSTALL_RE = re.compile(r"(\d+)\s+cuotas?\s+sin\s+inter", re.IGNORECASE)
+
+# Maximum number of matched products for which shipping GQL checks are fired.
+# Broad queries (e.g. "PS5") can return hundreds of matches; even with full concurrency
+# the wall time is bounded by the slowest single GQL call (~27s for 365 products).
+# Queries that return more than this threshold will show free_shipping=False for all results.
+_MAX_SHIPPING_CHECKS = 100
+
+# ---------------------------------------------------------------------------
+# Per-SKU shipping result cache
+# ---------------------------------------------------------------------------
+# V1 LAUNCH INSTRUCTION: set _SHIPPING_CACHE_ENABLED = True before going live.
+# This eliminates the ~27s Fravega shipping wall-time on repeated queries by
+# returning cached results for SKU+seller+postal combinations seen before.
+# Each entry expires after _SHIPPING_CACHE_TTL_SECONDS (default: 24 h).
+#
+# Left False during development/testing so that live shipping data is always
+# fetched and the cache does not mask bugs or stale results.
+_SHIPPING_CACHE_ENABLED = False
+_SHIPPING_CACHE_TTL_SECONDS = 86_400  # 24 hours
+_shipping_cache: dict[tuple[str, str, str], tuple[bool, float]] = {}  # (sku, seller_id, postal_code) -> (result, timestamp)
 
 
 class FravegaAdapter(StoreAdapter):
@@ -83,12 +104,18 @@ class FravegaAdapter(StoreAdapter):
                 detail_tasks.append((idx, sku_code))
 
         if shipping_tasks:
-            shipping_results = await asyncio.gather(*[
-                self._fetch_free_shipping(sku, seller_id)
-                for _, sku, seller_id in shipping_tasks
-            ])
-            for (idx, _, _), is_free in zip(shipping_tasks, shipping_results):
-                results[idx].free_shipping = is_free
+            if len(shipping_tasks) > _MAX_SHIPPING_CHECKS:
+                logger.debug(
+                    "[fravega] %d shipping tasks exceed threshold (%d); skipping shipping checks",
+                    len(shipping_tasks), _MAX_SHIPPING_CHECKS,
+                )
+            else:
+                shipping_results = await asyncio.gather(*[
+                    self._fetch_free_shipping(sku, seller_id)
+                    for _, sku, seller_id in shipping_tasks
+                ])
+                for (idx, _, _), is_free in zip(shipping_tasks, shipping_results):
+                    results[idx].free_shipping = is_free
 
         if detail_tasks:
             plans_list = await asyncio.gather(*[
@@ -169,6 +196,14 @@ class FravegaAdapter(StoreAdapter):
 
     async def _fetch_free_shipping(self, sku: str, seller_id: str) -> bool:
         """Returns True if home delivery is free for this SKU+seller at the configured postal code."""
+        if _SHIPPING_CACHE_ENABLED:
+            cache_key = (sku, seller_id, self.postal_code)
+            entry = _shipping_cache.get(cache_key)
+            if entry is not None:
+                result, ts = entry
+                if time.time() - ts < _SHIPPING_CACHE_TTL_SECONDS:
+                    return result
+
         gql = (
             f'{{ calculateDeliveryTermAndCost(sku: "{sku}", seller: "{seller_id}", postalCode: "{self.postal_code}") {{'
             "  cost"
@@ -176,10 +211,15 @@ class FravegaAdapter(StoreAdapter):
         )
         try:
             data = (await self._post_gql(gql)).get("data", {}).get("calculateDeliveryTermAndCost") or {}
-            return data.get("cost") == 0
+            result = data.get("cost") == 0
         except Exception as e:
             logger.warning("[fravega] shipping check failed for sku %s: %s", sku, e)
-            return False
+            result = False
+
+        if _SHIPPING_CACHE_ENABLED:
+            _shipping_cache[(sku, seller_id, self.postal_code)] = (result, time.time())
+
+        return result
 
     async def _fetch_plans(self, sku: str) -> list[Installment]:
         """Fetches all payment plans for a SKU and returns interest-free installments with card names."""

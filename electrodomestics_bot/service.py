@@ -58,16 +58,15 @@ async def search_products(
             all_results[adapter.name] = cache.get_query_products(conn, adapter.name, query)
 
         if new_stores:
-            # Acquire per-store-query locks so only one request scrapes at a time.
-            for adapter in new_stores:
+            # Each store gets its own coroutine; all run concurrently via gather.
+            # Per-store-query locks still prevent duplicate scrapes — each coroutine
+            # acquires only its own store's lock, so stores never block each other.
+            async def _fetch_one(adapter) -> tuple[str, list]:
                 key = _lock_key(adapter.name, query)
                 async with _query_locks[key]:
                     # Re-check cache inside the lock — another request may have filled it.
                     if use_cache and cache.has_query(conn, adapter.name, query):
-                        all_results[adapter.name] = cache.get_query_products(
-                            conn, adapter.name, query
-                        )
-                        continue
+                        return adapter.name, cache.get_query_products(conn, adapter.name, query)
 
                     live = await search_all_stores(query, [adapter], detail=detail)
                     live_results = live.get(adapter.name, [])
@@ -98,6 +97,9 @@ async def search_products(
                     if final:
                         cache.record_query(conn, adapter.name, query, [r.url for r in final])
 
-                    all_results[adapter.name] = final
+                    return adapter.name, final
+
+            for name, results in await asyncio.gather(*[_fetch_one(a) for a in new_stores]):
+                all_results[name] = results
 
         return {a.name: all_results.get(a.name, []) for a in ADAPTERS}
