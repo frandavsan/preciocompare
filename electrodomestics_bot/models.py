@@ -23,7 +23,7 @@ class ProductResult:
     url: str
     installments: list[Installment] = field(default_factory=list)
     free_shipping: bool = False
-    international: bool = False
+    international: Optional[bool] = False
     available: bool = True
 
     def to_dict(self) -> dict:
@@ -61,7 +61,7 @@ class ProductResponse(BaseModel):
     url: str
     installments: list[InstallmentResponse]
     free_shipping: bool
-    international: bool
+    international: Optional[bool]
     available: bool
 
     @classmethod

@@ -26,6 +26,7 @@ ElectrodomesticsBot/
 ├── bench/                              ← benchmarks and one-off debug scripts (not production)
 │   ├── bench_fravega.py                ← Fravega timing benchmark (unlimited vs semaphored concurrency)
 │   ├── bench_ps5.py                    ← multi-store diagnostic benchmark for broad queries
+│   ├── bench_s26.py                    ← comprehensive per-store timing benchmark with phase breakdown
 │   ├── analyze_plans.py                ← offline analysis of Fravega plans API response
 │   └── fetch_fravega_plans.py          ← one-off script to fetch raw plans GQL from Fravega
 └── electrodomestics_bot/
@@ -38,12 +39,15 @@ ElectrodomesticsBot/
     ├── platforms/                      ← INFRASTRUCTURE LAYER
     │   ├── fravega.py                  ← All Fravega Next.js + Apollo GraphQL logic
     │   ├── magento.py                  ← All Magento 2 + Summa Solutions logic
+    │   ├── megatone.py                 ← All Megatone / Doofinder v6 logic
     │   └── vtex.py                     ← All VTEX Intelligent Search logic
     └── adapters/                       ← STORE LAYER
         ├── base.py                     ← StoreAdapter ABC
         ├── __init__.py                 ← ADAPTERS list (edit this to add/remove stores)
+        ├── castillo.py                 ← CastilloAdapter(VtexAdapter) — installment override + free shipping
         ├── cetrogar.py                 ← CetrogarAdapter(MagentoAdapter) — 5 lines
         ├── fravega.py                  ← FravegaStoreAdapter(FravegaAdapter) — 5 lines
+        ├── megatone.py                 ← MegatoneAdapter(MegatonePlatform) — 4 lines
         └── oncity.py                   ← OncityAdapter(VtexAdapter) — 5 lines
 ```
 
@@ -60,7 +64,7 @@ ElectrodomesticsBot/
 | `installments` | `list[Installment]` | Interest-free options only |
 | `available` | `bool` | Whether the product is in stock |
 | `free_shipping` | `bool` | Whether home delivery is free |
-| `international` | `bool` | "Compra Internacional" marketplace products |
+| `international` | `Optional[bool]` | "Compra Internacional" marketplace products; `None` when concept doesn't apply (e.g. regional stores) |
 | `url` | `str` | Direct product page URL |
 
 `Installment` fields: `count` (number of installments), `amount` (price per installment), `cards` (list of card/bank names offering this option).
@@ -69,8 +73,10 @@ ElectrodomesticsBot/
 
 | Store | Platform | Adapter | Notes |
 |---|---|---|---|
+| Castillo | VTEX Intelligent Search | `adapters/castillo.py` | Regional store (Tucumán); `postal_code="4000"`, `_free_shipping_override=True`, hardcoded `_INSTALLMENT_CARDS` |
 | Cetrogar | Magento 2 + Summa Solutions | `adapters/cetrogar.py` | |
 | Fravega | Custom Next.js + Apollo GraphQL | `adapters/fravega.py` | Uses `curl_cffi` for Cloudflare bypass |
+| Megatone | Doofinder v6 search + custom installments API | `adapters/megatone.py` | 6 batched parallel `retornarplanes` calls for all sin-interés card/count data |
 | OnCity | VTEX Intelligent Search | `adapters/oncity.py` | `verify_ssl=False` due to cert issue |
 
 ## Platform Details
@@ -91,12 +97,14 @@ ElectrodomesticsBot/
 ### VTEX (`platforms/vtex.py`)
 - Search: `/_v/api/intelligent-search/product_search/?query={}&count=50&page={N}` — paginated, capped at 10 pages (500 results)
 - Pagination: response contains `pagination.count` (total pages); extra pages fetched in parallel via `asyncio.gather`
-- Shipping simulation: `/api/checkout/pub/orderForms/simulation` (POST), unlimited concurrency via `asyncio.gather`; skipped for unavailable products
+- Shipping simulation: `/api/checkout/pub/orderForms/simulation` (POST), unlimited concurrency via `asyncio.gather`; skipped for unavailable products and when `_free_shipping_override` is set
 - Price and installments read from `commertialOffer` in the search response — no extra page fetch needed
+- Installments filtered to `PaymentSystemGroupName == "creditCardPaymentGroup"` — excludes debit, cash, and other payment types that pollute the installment list
 - Multi-seller products: always use `_get_real_seller()` — international/marketplace products have a dummy seller "1" with Price=0 alongside the real seller
 - Availability: `AvailableQuantity > 0` on any seller
-- International products: detected via `categories` containing `/Compra Internacional/` or `productClusters` named "Compra Internacional"
+- International products: detected via `categories` containing `/Compra Internacional/` or `productClusters` named "Compra Internacional"; returns `Optional[bool]` — `None` when the concept doesn't apply
 - Free shipping: detected via simulation API — any `slas[]` entry with `deliveryChannel == "delivery"` and `price == 0`
+- `_free_shipping_override`: set to `True`/`False` in adapter to skip shipping simulation entirely (use for stores where all deliveries are free, or where the API is unreliable)
 
 ### Magento 2 + Summa Solutions (`platforms/magento.py`)
 - Search: `/catalogsearch/result/index/?q={}&p={N}` — full HTML search results, ~40 products/page, paginated, capped at 10 pages (~400 results)
@@ -106,6 +114,23 @@ ElectrodomesticsBot/
 - Card names: not available from search results page; only obtainable by fetching individual product pages via `_fetch_installments()`
 - Free shipping: always `False` (Magento stores in scope don't offer it)
 - Availability: always `True` (catalogsearch only surfaces in-stock products)
+
+### Megatone / Doofinder v6 (`platforms/megatone.py`)
+- Search engine: **Doofinder** (third-party SaaS); endpoint `https://us1-search.doofinder.com/6/{hashid}/_search`
+- **HTTP client:** standard `httpx` via `get_client()` — no Cloudflare protection on Doofinder endpoint. Requires `Origin` and `Referer` headers matching the store domain (Doofinder enforces domain whitelisting; omitting headers returns 403).
+- Pagination: `rpp=100` per page; `total` field in response used for pagination count; extra pages fetched in parallel via `asyncio.gather`; capped at 10 pages (1,000 results)
+- Price: `sale_price` field (not `price` — `price` is the inflated list price; `sale_price` is what the customer pays)
+- Availability: `availability == "in stock"` (string comparison, case-insensitive)
+- Free shipping: `free_shipping == "true"` (string boolean)
+- International: `productointernacional == "true"` (string boolean)
+- **Installments:** `highlight_installments` field contains a text label; only products with `"Sin Inter"` in this field get installment detail. No card names from search API — full card/count data fetched from the store's own `retornarplanes` endpoint.
+- **Installment batching:** all eligible SKUs are batched into **6 parallel** `retornarplanes` calls (not one call per product):
+  1. `IdTarjeta=0` (comprehensive — all card-level plans)
+  2. `IdTarjeta=2` (AmEx — not included in comprehensive)
+  3–6. `IdTarjeta=5` + each bank in `_BANK_PROMOS` (bank-exclusive 9x+ tiers)
+- **Amount calculation:** since all plans are 0% interest, amount = `price / count` (exact). The API's `valor` field is not used — avoids per-product calls.
+- **Bank promos:** only appear in results when they exceed the base Visa count (mirrors website display logic)
+- `_SUCURSAL = 104` (web store; override with 434 for MX stores)
 
 ## Golden Rule: Infrastructure First
 
@@ -138,6 +163,12 @@ The goal is that adding a new store requires nothing more than declaring its `na
 | Summa Solutions installment scraping | `platforms/magento.py` | Scraped from `div.installment-info` on search page (no extra fetches); `_fetch_installments()` available for full card data |
 | Summa card logo filename map | `platforms/magento.py` | Same CDN filenames across all Summa stores (used by `_fetch_installments` only) |
 | OnCity SSL workaround (`verify_ssl=False`) | `adapters/oncity.py` | OnCity-specific certificate issue |
+| Megatone Doofinder search + pagination | `platforms/megatone.py` | Doofinder platform contract |
+| Megatone installment batching (`retornarplanes`) | `platforms/megatone.py` | All Doofinder-backed stores use same plans API |
+| Megatone bank promo detection | `platforms/megatone.py` | Same logic across all Doofinder stores |
+| Castillo `_INSTALLMENT_CARDS` override | `adapters/castillo.py` | Castillo shows a fixed card set the API doesn't reflect |
+| Castillo `_free_shipping_override = True` | `adapters/castillo.py` | All Castillo deliveries are free; simulation would waste time |
+| Castillo `postal_code = "4000"` | `adapters/castillo.py` | Tucumán-based store; Buenos Aires postal code returns no shipping SLAs |
 
 ## Adding a New Store
 
@@ -171,6 +202,17 @@ class NewStoreAdapter(FravegaAdapter):
     base_url = "https://www.newstore.com.ar"
 ```
 
+**Megatone/Doofinder store:**
+```python
+# adapters/newstore.py
+from ..platforms.megatone import MegatoneAdapter as _MegatonePlatform
+
+class NewStoreAdapter(_MegatonePlatform):
+    name = "newstore"
+    base_url = "https://www.newstore.com.ar"
+    _doofinder_hashid = "..."   # find in DevTools: us1-search.doofinder.com/6/{hashid}/_search
+```
+
 Then add `NewStoreAdapter()` to the `ADAPTERS` list in `adapters/__init__.py`.
 
 ### Overridable class attributes
@@ -178,8 +220,12 @@ Then add `NewStoreAdapter()` to the `ADAPTERS` list in `adapters/__init__.py`.
 | Attribute | Default | Platform | When to override |
 |---|---|---|---|
 | `postal_code` | `"1425"` (Buenos Aires) | VTEX, Fravega | Different delivery region |
-| `verify_ssl` | `True` | VTEX, Fravega | Store has broken SSL cert |
+| `verify_ssl` | `True` | VTEX, Fravega, Megatone | Store has broken SSL cert |
 | `card_keywords` | standard Summa map | Magento | Store uses non-standard card logo filenames |
+| `_free_shipping_override` | `None` | VTEX | `True` = all free, `False` = none free; skips simulation entirely |
+| `_SUCURSAL` | `104` (web/AR) | Megatone | `434` for MX stores |
+| `_BANK_PROMOS` | 4 Argentine banks | Megatone | Add/remove bank promo IDs for different store's active promos |
+| `_INSTALLMENT_CARDS` | _(none — use API data)_ | VTEX | Override to hardcode a store's card set when API returns extras the site doesn't show |
 
 ## Known Patterns and Gotchas
 
@@ -374,6 +420,36 @@ If you try to `from electrodomestics_bot.platforms.fravega import _session` (or 
 #### 25. Fravega search returns all variants under one item — first SKU/seller wins
 
 Unlike VTEX (which returns one item per variant with its own `commertialOffer`), Fravega's search API bundles all SKU variants under a single result. The platform extracts `skus.results[0]` (first SKU) and `sellers[0]` (first seller). In practice this is the primary variant (the one shown by default on the product page), but it may not be the cheapest. This is consistent with how the store displays its own search results.
+
+---
+
+### Megatone / Doofinder v6 (`platforms/megatone.py`)
+
+#### 26. Doofinder requires `Origin` header — bare requests return 403
+
+Doofinder's v6 API enforces domain whitelisting: every request must include `Origin: {store_base_url}` (and optionally `Referer: {store_base_url}/`). A bare GET with no `Origin` header returns HTTP 403. Always pass `self._origin_headers` on every Doofinder request.
+
+#### 27. `retornarplanes` accepts a list of SKUs — never call it per-product
+
+The `Productos` field in the `retornarplanes` POST payload accepts a list of SKU strings. Sending all eligible SKUs in one batch returns plans for all of them in a single response. Calling it once per product (N calls) is a common mistake — the batched approach (6 calls total regardless of product count) is correct and much faster.
+
+The 6 calls cover: `IdTarjeta=0` (comprehensive), `IdTarjeta=2` (AmEx), and `IdTarjeta=5` with each bank ID in `_BANK_PROMOS`. These fire in parallel via `asyncio.gather`.
+
+#### 28. Megatone installment amounts are calculated, not read from the API
+
+For 0% interest plans (`tasaDirecta == 0`), the installment amount is exactly `price / count`. The API's `valor` field is not needed and not used. This is intentional: the API returns a single `valor` per batch (computed from the `Capital` parameter), but each product has its own price. Calculating amounts locally (`price / count`) avoids per-product API calls.
+
+#### 29. Bank promos only appear when they beat base Visa — mirrors website display
+
+The `_BANK_PROMOS` entries (Banco Santa Fe, Entre Rios, San Juan, Santa Cruz) offer Visa-exclusive sin-interés tiers (typically 9x, 12x) that exceed the generic Visa tier. `_fetch_card_counts()` adds a bank to the installment list only when its best count exceeds `visa_max`. If a bank only matches Visa (e.g., both 6x), it is suppressed — consistent with how the Megatone website collapses duplicate rows.
+
+#### 30. VTEX `commertialOffer` installments include non-credit-card payment types
+
+The `Installments[]` array from VTEX's `commertialOffer` includes boleto (bank slip), debit cards, and other payment methods alongside credit cards. These have `PaymentSystemGroupName != "creditCardPaymentGroup"` and appear as spurious multi-installment entries (e.g., "3x" for debit). The platform now filters to `creditCardPaymentGroup` only. Do not remove this filter — it was added because stores like Castillo were showing debit/boleto installments as if they were card promotions.
+
+#### 31. `international` is `Optional[bool]` — `None` means "concept doesn't apply"
+
+For regional stores that don't have international marketplace products (e.g., Castillo in Tucumán), `_is_international()` returns `None` instead of `False`. This is a semantic distinction: `False` means "we checked and it isn't international"; `None` means "this field is meaningless for this store." The display layer renders `None` as `-`, and the cache layer stores it as `0` (same as `False` for now). When adding a new regional store, override `_is_international()` to return `None` if the concept doesn't apply.
 
 ---
 

@@ -44,7 +44,7 @@ def print_results(
                 print(f"     Cuotas   : N/A")
             print(f"     Available    : {r.available}")
             print(f"     Free shipping: {r.free_shipping}")
-            print(f"     International: {r.international}")
+            print(f"     International: {'-' if r.international is None else r.international}")
             print(f"     URL      : {r.url}")
             if i < len(shown):
                 print()

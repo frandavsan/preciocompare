@@ -29,6 +29,7 @@ class VtexAdapter(StoreAdapter):
     # --- subclasses may override ---
     postal_code: str = "1425"   # Buenos Aires; change for non-AR stores
     verify_ssl: bool = True
+    _free_shipping_override: Optional[bool] = None  # set to skip shipping simulation entirely
 
     @property
     def search_url(self) -> str:
@@ -50,11 +51,13 @@ class VtexAdapter(StoreAdapter):
 
         # Run shipping simulations concurrently for available products only.
         available_indices = [i for i, p in enumerate(products) if self._is_available(p)]
-        if available_indices:
+        if available_indices and self._free_shipping_override is None:
             shipping_results = await asyncio.gather(
                 *[self._check_free_shipping(products[i]) for i in available_indices]
             )
             shipping_map = dict(zip(available_indices, shipping_results))
+        elif available_indices:
+            shipping_map = {i: self._free_shipping_override for i in available_indices}
         else:
             shipping_map = {}
 
@@ -179,7 +182,7 @@ class VtexAdapter(StoreAdapter):
                 return seller
         return sellers[0] if sellers else {}
 
-    def _is_international(self, product: dict) -> bool:
+    def _is_international(self, product: dict) -> Optional[bool]:
         for cat in product.get("categories", []):
             if "/Compra Internacional/" in cat:
                 return True
@@ -254,6 +257,9 @@ class VtexAdapter(StoreAdapter):
             for inst in seller.get("commertialOffer", {}).get("Installments", []):
                 count = inst.get("NumberOfInstallments", 1)
                 if count <= 1 or inst.get("InterestRate", 1) != 0:
+                    continue
+                group = inst.get("PaymentSystemGroupName", "")
+                if group and group != "creditCardPaymentGroup":
                     continue
                 key = (count, float(inst["Value"]))
                 card = inst.get("PaymentSystemName", "")

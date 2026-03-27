@@ -262,7 +262,7 @@ def upsert_products(conn: sqlite3.Connection, store: str, results: list[ProductR
                 """,
                 (
                     store, r.sku, r.name, r.price, r.currency,
-                    int(r.available), int(r.free_shipping), int(r.international),
+                    int(r.available), int(r.free_shipping), 1 if r.international is True else 0,
                     r.url, now,
                 ),
             )
@@ -309,7 +309,7 @@ def insert_new_products(
                 """,
                 (
                     store, r.sku, r.name, r.price, r.currency,
-                    int(r.available), int(r.free_shipping), int(r.international),
+                    int(r.available), int(r.free_shipping), 1 if r.international is True else 0,
                     r.url, now,
                 ),
             )

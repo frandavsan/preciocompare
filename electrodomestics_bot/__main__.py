@@ -53,13 +53,13 @@ def main() -> None:
         print_results(query, all_results, limit=_PREVIEW_LIMIT)
         print(f"  Completed in {elapsed:.1f}s\n")
 
-        stores_with_more = [name for name, products in all_results.items() if len(products) > _PREVIEW_LIMIT]
-        if stores_with_more:
-            options = " / ".join(stores_with_more) + " / all / n"
+        stores_with_results = [name for name, products in all_results.items() if products]
+        if stores_with_results:
+            options = " / ".join(stores_with_results) + " / all / n"
             choice = input(f"  Show more? [{options}]: ").strip().lower()
             if choice == "all":
                 print_results(query, all_results)
-            elif choice in all_results and len(all_results[choice]) > _PREVIEW_LIMIT:
+            elif choice in all_results and all_results[choice]:
                 print_results(query, {choice: all_results[choice]})
     except Exception as e:
         print(f"  Error: {e}")
