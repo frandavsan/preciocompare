@@ -24,6 +24,7 @@ from electrodomestics_bot.adapters.fravega import FravegaAdapter as _FravegaStor
 from electrodomestics_bot.platforms.fravega import FravegaAdapter as FravegaPlatform
 from electrodomestics_bot.platforms.vtex import VtexAdapter
 from electrodomestics_bot.platforms.magento import MagentoAdapter
+from electrodomestics_bot.platforms.megatone import MegatoneAdapter as MegatonePlatform
 from electrodomestics_bot.core import matches_query
 import electrodomestics_bot.core as _core
 
@@ -109,12 +110,14 @@ def _install_httpx_spy():
     core_mod.http_get = _spy_get
     core_mod.http_post = _spy_post
 
-    # Patch vtex.py and magento.py module references too
+    # Patch vtex.py, magento.py, and megatone.py module references too
     from electrodomestics_bot.platforms import vtex as vtex_mod
     from electrodomestics_bot.platforms import magento as magento_mod
+    from electrodomestics_bot.platforms import megatone as megatone_mod
     vtex_mod.http_get = _spy_get
     vtex_mod.http_post = _spy_post
     magento_mod.http_get = _spy_get
+    megatone_mod.http_post = _spy_post
 
 
 # Separate log for curl_cffi (fravega)
@@ -240,6 +243,32 @@ class InstrumentedMagento(MagentoAdapter):
         return results
 
 
+class InstrumentedMegatone(MegatonePlatform):
+    """Records per-phase timing for Megatone (Doofinder)."""
+
+    name = "megatone"
+    base_url = "https://www.megatone.net"
+    _doofinder_hashid = "7d78864dfd68192d967ce98f7af00970"
+
+    def _reset(self):
+        self._t_fetch_products = None
+        self._t_installments = None
+        self._n_products = 0
+
+    async def _fetch_all_products(self, query: str) -> list[dict]:
+        t0 = time.perf_counter()
+        results = await super()._fetch_all_products(query)
+        self._t_fetch_products = time.perf_counter() - t0
+        self._n_products = len(results)
+        return results
+
+    async def _fetch_card_counts(self, skus: list[str], capital: float) -> dict[str, int]:
+        t0 = time.perf_counter()
+        result = await super()._fetch_card_counts(skus, capital)
+        self._t_installments = time.perf_counter() - t0
+        return result
+
+
 # ------------------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------------------
@@ -274,7 +303,7 @@ def _print_http_log(log: RequestLog, label: str):
 # Benchmark: per-store sequential (current service.py behaviour)
 # ------------------------------------------------------------------------------
 
-async def run_store_sequential(fravega, vtex, magento):
+async def run_store_sequential(fravega, vtex, magento, megatone):
     """Runs stores one after the other, mirroring how service.py works."""
     print(f"\n{'-'*68}")
     print("SCENARIO A: SEQUENTIAL (current service.py behaviour)")
@@ -335,11 +364,27 @@ async def run_store_sequential(fravega, vtex, magento):
               f"sum={_fmt(sum(st))}")
     _print_http_log(_request_log, "OnCity HTTP")
 
+    # Megatone
+    print(f"\n  -> Running Megatone (Doofinder)...")
+    megatone._reset()
+    t0 = time.perf_counter()
+    megatone_results = await megatone.search(QUERY)
+    store_times["megatone"] = time.perf_counter() - t0
+    n_with_installments = sum(1 for r in megatone_results if r.installments)
+    print(f"    Done: {store_times['megatone']:.2f}s | "
+          f"{len(megatone_results)} matching products | "
+          f"{megatone._n_products} raw | "
+          f"{n_with_installments} with installments")
+    if megatone._t_installments is not None:
+        print(f"    Installment batch: {_fmt(megatone._t_installments)} "
+              f"(parallel retornarplanes: card networks + bank promos)")
+
     total_sequential = sum(store_times.values())
     print(f"\n  SEQUENTIAL TOTAL: {total_sequential:.2f}s")
     print(f"    cetrogar: {store_times['cetrogar']:.2f}s")
     print(f"    fravega:  {store_times['fravega']:.2f}s")
     print(f"    oncity:   {store_times['oncity']:.2f}s")
+    print(f"    megatone: {store_times['megatone']:.2f}s")
 
     return store_times
 
@@ -348,7 +393,7 @@ async def run_store_sequential(fravega, vtex, magento):
 # Benchmark: all stores in parallel (ideal behaviour)
 # ------------------------------------------------------------------------------
 
-async def run_stores_parallel(fravega, vtex, magento):
+async def run_stores_parallel(fravega, vtex, magento, megatone):
     """Runs all stores concurrently, like search_all_stores() does."""
     print(f"\n{'-'*68}")
     print("SCENARIO B: PARALLEL (all stores via asyncio.gather)")
@@ -357,6 +402,7 @@ async def run_stores_parallel(fravega, vtex, magento):
     fravega._reset()
     vtex._reset()
     magento._reset()
+    megatone._reset()
     _request_log.calls.clear()
     _fravega_log.calls.clear()
 
@@ -365,14 +411,16 @@ async def run_stores_parallel(fravega, vtex, magento):
         magento.search(QUERY),
         fravega.search(QUERY),
         vtex.search(QUERY),
+        megatone.search(QUERY),
     )
     parallel_total = time.perf_counter() - t0
-    cetrogar_results, fravega_results, vtex_results = results
+    cetrogar_results, fravega_results, vtex_results, megatone_results = results
 
     print(f"\n  PARALLEL TOTAL: {parallel_total:.2f}s")
     print(f"    cetrogar: {len(cetrogar_results)} matching products")
     print(f"    fravega:  {len(fravega_results)} matching products")
     print(f"    oncity:   {len(vtex_results)} matching products")
+    print(f"    megatone: {len(megatone_results)} matching products")
     if vtex._redirect_used:
         print(f"    [!]  VTEX redirect detected (legacy API fallback)")
 
@@ -485,7 +533,7 @@ async def diagnose_vtex_shipping_concurrency(vtex):
 # Diagnosis: matches_query filter rate
 # ------------------------------------------------------------------------------
 
-async def diagnose_filter_rates(fravega, vtex, magento):
+async def diagnose_filter_rates(fravega, vtex, magento, megatone):
     """Shows how many raw results are filtered out by matches_query."""
     print(f"\n{'-'*68}")
     print("MATCHES_QUERY FILTER RATES")
@@ -524,6 +572,17 @@ async def diagnose_filter_rates(fravega, vtex, magento):
               f"({len(raw_magento)-len(matched_magento)} filtered out)")
     except Exception as e:
         print(f"  Cetrogar: ERROR -- {e}")
+
+    # Megatone
+    try:
+        megatone._reset()
+        raw_megatone = await megatone._fetch_all_products(QUERY)
+        matched_megatone = [p for p in raw_megatone
+                            if p.get("title") and matches_query(p["title"], QUERY)]
+        print(f"  Megatone: {len(raw_megatone)} raw -> {len(matched_megatone)} matched "
+              f"({len(raw_megatone)-len(matched_megatone)} filtered out)")
+    except Exception as e:
+        print(f"  Megatone: ERROR -- {e}")
 
 
 # ------------------------------------------------------------------------------
@@ -582,18 +641,19 @@ async def main():
     fravega = InstrumentedFravega()
     vtex = InstrumentedVtex()
     magento = InstrumentedMagento()
+    megatone = InstrumentedMegatone()
 
     # 1. VTEX redirect diagnosis (cheap, run first)
     await diagnose_vtex_redirect(vtex)
 
     # 2. Filter rate diagnosis
-    await diagnose_filter_rates(fravega, vtex, magento)
+    await diagnose_filter_rates(fravega, vtex, magento, megatone)
 
     # 3. Sequential run (mirrors current service.py)
-    store_times = await run_store_sequential(fravega, vtex, magento)
+    store_times = await run_store_sequential(fravega, vtex, magento, megatone)
 
     # 4. Parallel run (ideal)
-    parallel_total = await run_stores_parallel(fravega, vtex, magento)
+    parallel_total = await run_stores_parallel(fravega, vtex, magento, megatone)
 
     # 5. VTEX shipping concurrency diagnosis
     await diagnose_vtex_shipping_concurrency(vtex)

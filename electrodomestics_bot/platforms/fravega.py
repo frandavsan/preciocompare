@@ -23,24 +23,27 @@ _MAX_PAGES = 10
 _INSTALL_RE = re.compile(r"(\d+)\s+cuotas?\s+sin\s+inter", re.IGNORECASE)
 
 # Maximum number of matched products for which shipping GQL checks are fired.
-# Broad queries (e.g. "PS5") can return hundreds of matches; even with full concurrency
-# the wall time is bounded by the slowest single GQL call (~27s for 365 products).
-# Queries that return more than this threshold will show free_shipping=False for all results.
-_MAX_SHIPPING_CHECKS = 100
+# Broad queries (e.g. "PS5") return hundreds of matches; shipping checks are skipped entirely
+# above this threshold to keep response time bounded. Below it, all matches are checked.
+# TODO: this is an all-or-nothing gate — results above the threshold always show free_shipping=False.
+# A better long-term solution would be to persist shipping results to the SQLite cache so that
+# data accumulates over time and broad queries eventually return accurate shipping without live calls.
+_MAX_SHIPPING_CHECKS = 50
 
 # ---------------------------------------------------------------------------
 # Per-SKU shipping result cache
 # ---------------------------------------------------------------------------
-# V1 LAUNCH INSTRUCTION: set _SHIPPING_CACHE_ENABLED = True before going live.
-# This eliminates the ~27s Fravega shipping wall-time on repeated queries by
+# Eliminates the ~14s Fravega shipping wall-time on repeated queries by
 # returning cached results for SKU+seller+postal combinations seen before.
 # Each entry expires after _SHIPPING_CACHE_TTL_SECONDS (default: 24 h).
-#
-# Left False during development/testing so that live shipping data is always
-# fetched and the cache does not mask bugs or stale results.
-_SHIPPING_CACHE_ENABLED = False
+# Process-local — cleared on restart; does not survive deployments.
+_SHIPPING_CACHE_ENABLED = True
 _SHIPPING_CACHE_TTL_SECONDS = 86_400  # 24 hours
 _shipping_cache: dict[tuple[str, str, str], tuple[bool, float]] = {}  # (sku, seller_id, postal_code) -> (result, timestamp)
+
+# Limits concurrent GQL calls to prevent connection resets under high parallelism.
+# Fravega's server sporadically resets connections when >40 calls are in-flight simultaneously.
+_GQL_SEM = asyncio.Semaphore(40)
 
 
 class FravegaAdapter(StoreAdapter):
@@ -163,12 +166,13 @@ class FravegaAdapter(StoreAdapter):
         """Posts a GraphQL query to the Fravega endpoint with one retry on transient failure."""
         for attempt in range(2):
             try:
-                resp = await _session.post(self._endpoint, json={"query": gql}, verify=self.verify_ssl)
-                resp.raise_for_status()
-                return resp.json()
+                async with _GQL_SEM:
+                    resp = await _session.post(self._endpoint, json={"query": gql}, verify=self.verify_ssl)
+                    resp.raise_for_status()
+                    return resp.json()
             except Exception:
                 if attempt == 0:
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(2)  # sleep outside semaphore so the slot isn't held during wait
                 else:
                     raise
 
