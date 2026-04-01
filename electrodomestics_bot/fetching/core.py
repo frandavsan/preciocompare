@@ -1,8 +1,10 @@
 import asyncio
 import logging
 import re
+import time
 import unicodedata
 import warnings
+from typing import Callable, Optional
 
 import httpx
 
@@ -75,7 +77,11 @@ def matches_query(product_name: str, query: str) -> bool:
 
 
 async def search_all_stores(
-    query: str, adapters: list, detail: bool = False, check_shipping: bool = True
+    query: str,
+    adapters: list,
+    detail: bool = False,
+    check_shipping: bool = True,
+    on_run: Optional[Callable] = None,
 ) -> dict[str, list[ProductResult]]:
     """
     Queries every store concurrently and returns filtered results per store.
@@ -84,6 +90,11 @@ async def search_all_stores(
     When detail=True, adapters may perform extra requests for richer data (e.g. card names).
     When check_shipping=False, all shipping simulation calls are skipped and free_shipping
     is forced to False for every product.
+
+    on_run: optional callback invoked once per adapter after each call completes.
+             Signature: (store: str, duration_ms: int, results: list[ProductResult],
+                         exc: Exception | None) -> None
+             Exceptions from on_run are suppressed — monitoring never crashes a search.
     """
     for adapter in adapters:
         if check_shipping:
@@ -94,12 +105,27 @@ async def search_all_stores(
                 adapter._free_shipping_override = False
 
     async def _fetch(adapter):
+        t0 = time.perf_counter()
+        exc_captured: Optional[Exception] = None
+        results: list[ProductResult] = []
         try:
             raw = await adapter.search(query, detail)
-            return adapter.name, [r for r in raw if r.name and matches_query(r.name, query)]
+            results = [r for r in raw if r.name and matches_query(r.name, query)]
         except Exception as e:
             logger.warning("%s failed — %s", adapter.name, e)
-            return adapter.name, []
+            exc_captured = e
+        finally:
+            if on_run is not None:
+                try:
+                    on_run(
+                        adapter.name,
+                        int((time.perf_counter() - t0) * 1000),
+                        results,
+                        exc_captured,
+                    )
+                except Exception:
+                    pass
+        return adapter.name, results
 
     pairs = await asyncio.gather(*[_fetch(a) for a in adapters])
     results = dict(pairs)

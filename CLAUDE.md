@@ -41,6 +41,12 @@ ElectrodomesticsBot/
     │   ├── magento.py                  ← All Magento 2 + Summa Solutions logic
     │   ├── megatone.py                 ← All Megatone / Doofinder v6 logic
     │   └── vtex.py                     ← All VTEX Intelligent Search logic
+    ├── monitoring/                     ← OBSERVABILITY LAYER
+    │   ├── storage.py                  ← SQLite schema + read/write API for monitoring.db
+    │   ├── collector.py                ← make_run_callback(): records adapter_runs rows
+    │   ├── anomaly.py                  ← check(): detects quality issues, writes anomalies
+    │   ├── alerts.py                   ← Telegram fire-and-forget notifications
+    │   └── canary.py                   ← run_all(): post-refresh health probes
     └── adapters/                       ← STORE LAYER
         ├── base.py                     ← StoreAdapter ABC
         ├── __init__.py                 ← ADAPTERS list (edit this to add/remove stores)
@@ -76,7 +82,7 @@ ElectrodomesticsBot/
 | Castillo | VTEX Intelligent Search | `adapters/castillo.py` | Regional store (Tucumán); `postal_code="4000"`, `_free_shipping_override=True`, hardcoded `_INSTALLMENT_CARDS` |
 | Cetrogar | Magento 2 + Summa Solutions | `adapters/cetrogar.py` | |
 | Fravega | Custom Next.js + Apollo GraphQL | `adapters/fravega.py` | Uses `curl_cffi` for Cloudflare bypass |
-| Megatone | Doofinder v6 search + custom installments API | `adapters/megatone.py` | 6 batched parallel `retornarplanes` calls for all sin-interés card/count data |
+| Megatone | Doofinder v6 search + custom installments API | `adapters/megatone.py` | Individual `retornarplanes` calls per card network + bank promos, all in parallel |
 | OnCity | VTEX Intelligent Search | `adapters/oncity.py` | `verify_ssl=False` due to cert issue |
 
 ## Platform Details
@@ -124,13 +130,61 @@ ElectrodomesticsBot/
 - Free shipping: `free_shipping == "true"` (string boolean)
 - International: `productointernacional == "true"` (string boolean)
 - **Installments:** `highlight_installments` field contains a text label; only products with `"Sin Inter"` in this field get installment detail. No card names from search API — full card/count data fetched from the store's own `retornarplanes` endpoint.
-- **Installment batching:** all eligible SKUs are batched into **6 parallel** `retornarplanes` calls (not one call per product):
-  1. `IdTarjeta=0` (comprehensive — all card-level plans)
-  2. `IdTarjeta=2` (AmEx — not included in comprehensive)
-  3–6. `IdTarjeta=5` + each bank in `_BANK_PROMOS` (bank-exclusive 9x+ tiers)
+- **Installment strategy:** uses a single **representative SKU** (highest-priced eligible product) to query plans — avoids the API returning an empty intersection when a mixed list of SKUs is sent. The resulting tiers are applied to all eligible products.
+- **Parallel calls:** all card/bank calls fire concurrently via `asyncio.gather` in three groups:
+  1. **Individual card networks** (`_CARD_CALLS`): Visa(5), Mastercard(3), AmEx(2), Cabal(6), NaranjaX(7) — individual calls return correct counts; the comprehensive call understates them.
+  2. **Special cards**: Directo/debit(18) — only lowest sin-interés tier shown; Comprehensive(0) — fallback for Mercado Pago (no dedicated IdTarjeta).
+  3. **Bank promos** (`_BANK_PROMOS`): `IdTarjeta=5` + each bank ID — 8 Argentine banks (BNA, Galicia, BBVA, Santander, Santa Fe, Entre Rios, San Juan, Santa Cruz).
 - **Amount calculation:** since all plans are 0% interest, amount = `price / count` (exact). The API's `valor` field is not used — avoids per-product calls.
-- **Bank promos:** only appear in results when they exceed the base Visa count (mirrors website display logic)
+- **Bank promos:** only appear in results when they exceed the base Visa count (mirrors website display logic).
+- **Comprehensive call fallback:** `IdTarjeta=0` is kept only to catch cards without a dedicated call (e.g. Mercado Pago). Cards already populated by individual calls are skipped — the comprehensive call understates their counts.
 - `_SUCURSAL = 104` (web store; override with 434 for MX stores)
+
+## Monitoring System (`electrodomestics_bot/monitoring/`)
+
+A lightweight observability layer backed by a separate SQLite DB (`data/monitoring.db`) — kept isolated from `data/cache.db` so monitoring writes never contend with product data reads.
+
+### Components
+
+| File | Role |
+|---|---|
+| `storage.py` | Schema, migrations, all read/write DB functions |
+| `collector.py` | `make_run_callback()` — records every adapter call to `adapter_runs` |
+| `anomaly.py` | `check()` — inspects live results for null prices, zero results, install drop; records to `anomalies` |
+| `alerts.py` | `alert_anomalies()` / `alert_canary_failures()` — fire-and-forget Telegram notifications |
+| `canary.py` | `run_all()` — runs 6 fixed (store, query) health-check probes post-refresh |
+
+### DB Schema (`SCHEMA_VERSION = 1`)
+
+| Table | Written by | Purpose |
+|---|---|---|
+| `adapter_runs` | `collector.py` via `record_run()` | One row per live adapter call; stores duration, result count, error info |
+| `anomalies` | `anomaly.py` via `record_anomaly()` | Quality issues detected in live results; `acknowledged` flag for triage |
+| `canary_runs` | `canary.py` via `record_canary_run()` | One row per canary probe; `passed` flag + optional `failure_reason` |
+| `refresh_runs` | `refresh.py` via `record_refresh_run()` | Summary row per nightly refresh; stores/products/queries attempted vs succeeded |
+
+Schema migrations follow the same version table pattern as `cache.py`: bump `SCHEMA_VERSION`, add entries to `MIGRATIONS`, `run_migrations()` applies them on every DB open.
+
+### Integration Points
+
+- **`fetching/core.py` → `search_all_stores()`**: accepts optional `on_run` callback; `collector.make_run_callback(query)` is passed here from `service.py` to record every adapter call.
+- **`fetching/service.py` → `_fetch_one()`**: calls `anomaly.check()` on live results after each store fetch; schedules `alert_anomalies()` as a background task if anomalies are found.
+- **`refresh.py` → `refresh_all()`**: calls `record_refresh_run()` after every nightly refresh, then calls `prune_old_runs()` to enforce 30-day retention.
+- **`refresh.py` → `main()`**: runs `canary.run_all()` post-refresh and calls `alert_canary_failures()` if any probes fail.
+
+### REST Endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/health` | GET | Store count, last canary per store, last refresh summary, `monitoring.db` size |
+| `/health/anomalies` | GET | All unacknowledged anomalies, newest first |
+| `/health/anomalies/{id}/acknowledge` | POST | Mark a single anomaly acknowledged (removes it from the open list) |
+
+### Retention Policy
+
+`prune_old_runs(days=30)` deletes rows older than 30 days from `adapter_runs`, `canary_runs`, and `refresh_runs`. Acknowledged anomalies are also pruned at 30 days; **unacknowledged anomalies are preserved indefinitely** so they can be triaged first. Called automatically by `refresh.py` after each nightly run.
+
+---
 
 ## Golden Rule: Infrastructure First
 
@@ -224,7 +278,7 @@ Then add `NewStoreAdapter()` to the `ADAPTERS` list in `adapters/__init__.py`.
 | `card_keywords` | standard Summa map | Magento | Store uses non-standard card logo filenames |
 | `_free_shipping_override` | `None` | VTEX | `True` = all free, `False` = none free; skips simulation entirely |
 | `_SUCURSAL` | `104` (web/AR) | Megatone | `434` for MX stores |
-| `_BANK_PROMOS` | 4 Argentine banks | Megatone | Add/remove bank promo IDs for different store's active promos |
+| `_BANK_PROMOS` | 8 Argentine banks | Megatone | Add/remove bank promo IDs for different store's active promos |
 | `_INSTALLMENT_CARDS` | _(none — use API data)_ | VTEX | Override to hardcode a store's card set when API returns extras the site doesn't show |
 
 ## Known Patterns and Gotchas
@@ -429,11 +483,11 @@ Unlike VTEX (which returns one item per variant with its own `commertialOffer`),
 
 Doofinder's v6 API enforces domain whitelisting: every request must include `Origin: {store_base_url}` (and optionally `Referer: {store_base_url}/`). A bare GET with no `Origin` header returns HTTP 403. Always pass `self._origin_headers` on every Doofinder request.
 
-#### 27. `retornarplanes` accepts a list of SKUs — never call it per-product
+#### 27. Use a single representative SKU for `retornarplanes` — never call it per-product
 
-The `Productos` field in the `retornarplanes` POST payload accepts a list of SKU strings. Sending all eligible SKUs in one batch returns plans for all of them in a single response. Calling it once per product (N calls) is a common mistake — the batched approach (6 calls total regardless of product count) is correct and much faster.
+The `Productos` field in the `retornarplanes` POST payload accepts a list of SKU strings. However, sending a mixed list of eligible SKUs causes the API to return only the **intersection** of plans valid for all of them — which collapses to nothing when products have different plan eligibility. The correct approach is to send a single representative SKU (the highest-priced eligible product), then apply the resulting tiers to all eligible products.
 
-The 6 calls cover: `IdTarjeta=0` (comprehensive), `IdTarjeta=2` (AmEx), and `IdTarjeta=5` with each bank ID in `_BANK_PROMOS`. These fire in parallel via `asyncio.gather`.
+The calls fire in parallel via `asyncio.gather`: individual card network calls (`_CARD_CALLS`: Visa/5, Mastercard/3, AmEx/2, Cabal/6, NaranjaX/7), a Directo/debit call (18), a comprehensive fallback (0, for Mercado Pago), and `IdTarjeta=5` with each bank ID in `_BANK_PROMOS`.
 
 #### 28. Megatone installment amounts are calculated, not read from the API
 
@@ -441,7 +495,7 @@ For 0% interest plans (`tasaDirecta == 0`), the installment amount is exactly `p
 
 #### 29. Bank promos only appear when they beat base Visa — mirrors website display
 
-The `_BANK_PROMOS` entries (Banco Santa Fe, Entre Rios, San Juan, Santa Cruz) offer Visa-exclusive sin-interés tiers (typically 9x, 12x) that exceed the generic Visa tier. `_fetch_card_counts()` adds a bank to the installment list only when its best count exceeds `visa_max`. If a bank only matches Visa (e.g., both 6x), it is suppressed — consistent with how the Megatone website collapses duplicate rows.
+The `_BANK_PROMOS` entries (BNA, Galicia, BBVA, Santander, Santa Fe, Entre Rios, San Juan, Santa Cruz — 8 banks total) offer Visa-exclusive sin-interés tiers that exceed the generic Visa tier. `_fetch_card_counts()` adds a bank to the installment list only when its best count exceeds `visa_max`. If a bank only matches Visa (e.g., both 3x), it is suppressed — consistent with how the Megatone website collapses duplicate rows.
 
 #### 30. VTEX `commertialOffer` installments include non-credit-card payment types
 

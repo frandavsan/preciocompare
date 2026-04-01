@@ -10,6 +10,9 @@ from . import cache
 from .adapters import ADAPTERS
 from .core import search_all_stores
 from ..models import ProductResult
+from ..monitoring import anomaly as _anomaly
+from ..monitoring.alerts import alert_anomalies as _alert_anomalies
+from ..monitoring.collector import make_run_callback
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +71,14 @@ async def search_products(
                     if use_cache and cache.has_query(conn, adapter.name, query):
                         return adapter.name, cache.get_query_products(conn, adapter.name, query)
 
-                    live = await search_all_stores(query, [adapter], detail=detail, check_shipping=check_shipping)
+                    live = await search_all_stores(
+                        query, [adapter], detail=detail, check_shipping=check_shipping,
+                        on_run=make_run_callback(query),
+                    )
                     live_results = live.get(adapter.name, [])
+                    found = _anomaly.check(query, {adapter.name: live_results})
+                    if found:
+                        asyncio.create_task(_alert_anomalies(found))
 
                     if use_cache:
                         # Preserve richer cached data: use DB version for existing products,
