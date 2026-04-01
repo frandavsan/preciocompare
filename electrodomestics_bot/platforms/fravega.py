@@ -65,6 +65,7 @@ class FravegaAdapter(StoreAdapter):
     base_url: str
     verify_ssl: bool = True
     postal_code: str = "1425"
+    _free_shipping_override: Optional[bool] = None
 
     @property
     def _endpoint(self) -> str:
@@ -107,7 +108,10 @@ class FravegaAdapter(StoreAdapter):
                 detail_tasks.append((idx, sku_code))
 
         if shipping_tasks:
-            if len(shipping_tasks) > _MAX_SHIPPING_CHECKS:
+            if self._free_shipping_override is not None:
+                for idx, _, _ in shipping_tasks:
+                    results[idx].free_shipping = self._free_shipping_override
+            elif len(shipping_tasks) > _MAX_SHIPPING_CHECKS:
                 logger.debug(
                     "[fravega] %d shipping tasks exceed threshold (%d); skipping shipping checks",
                     len(shipping_tasks), _MAX_SHIPPING_CHECKS,

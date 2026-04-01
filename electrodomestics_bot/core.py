@@ -75,14 +75,24 @@ def matches_query(product_name: str, query: str) -> bool:
 
 
 async def search_all_stores(
-    query: str, adapters: list, detail: bool = False
+    query: str, adapters: list, detail: bool = False, check_shipping: bool = True
 ) -> dict[str, list[ProductResult]]:
     """
     Queries every store concurrently and returns filtered results per store.
     Stores that fail are logged and returned as empty lists.
     Result order matches the order of the adapters list.
     When detail=True, adapters may perform extra requests for richer data (e.g. card names).
+    When check_shipping=False, all shipping simulation calls are skipped and free_shipping
+    is forced to False for every product.
     """
+    for adapter in adapters:
+        if check_shipping:
+            if hasattr(adapter, "postal_code"):
+                adapter.postal_code = "1428"
+        else:
+            if hasattr(adapter, "_free_shipping_override"):
+                adapter._free_shipping_override = False
+
     async def _fetch(adapter):
         try:
             raw = await adapter.search(query, detail)
@@ -92,4 +102,11 @@ async def search_all_stores(
             return adapter.name, []
 
     pairs = await asyncio.gather(*[_fetch(a) for a in adapters])
-    return dict(pairs)
+    results = dict(pairs)
+
+    if not check_shipping:
+        for store_results in results.values():
+            for product in store_results:
+                product.free_shipping = False
+
+    return results

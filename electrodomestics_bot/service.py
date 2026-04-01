@@ -31,7 +31,7 @@ def _db():
 
 
 async def search_products(
-    query: str, detail: bool = False, use_cache: bool = True
+    query: str, detail: bool = False, use_cache: bool = True, check_shipping: bool = True
 ) -> dict[str, list[ProductResult]]:
     """
     Returns results for every store.
@@ -68,7 +68,7 @@ async def search_products(
                     if use_cache and cache.has_query(conn, adapter.name, query):
                         return adapter.name, cache.get_query_products(conn, adapter.name, query)
 
-                    live = await search_all_stores(query, [adapter], detail=detail)
+                    live = await search_all_stores(query, [adapter], detail=detail, check_shipping=check_shipping)
                     live_results = live.get(adapter.name, [])
 
                     if use_cache:
