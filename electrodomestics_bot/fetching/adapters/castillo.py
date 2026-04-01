@@ -1,6 +1,6 @@
 from typing import Optional
 
-from ..models import Installment
+from ...models import Installment
 from ..platforms.vtex import VtexAdapter
 
 

@@ -9,7 +9,7 @@ from typing import Optional
 from urllib.parse import quote
 
 from ..core import get_client, http_post, matches_query
-from ..models import Installment, ProductResult
+from ...models import Installment, ProductResult
 from ..adapters.base import StoreAdapter
 
 

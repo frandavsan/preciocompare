@@ -3,9 +3,9 @@ import logging
 import sys
 import time
 
-from .display import print_comparison, print_results
-from .matching import dedup_results, group_results
-from .service import search_products
+from .processing.display import print_comparison, print_results
+from .processing.matching import dedup_results, group_results
+from .fetching.service import search_products
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s — %(message)s")
 

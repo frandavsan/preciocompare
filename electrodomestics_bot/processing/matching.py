@@ -19,7 +19,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
-from .models import ProductResult
+from ..models import ProductResult
 
 
 @dataclass

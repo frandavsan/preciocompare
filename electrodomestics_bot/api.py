@@ -4,9 +4,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .adapters import ADAPTERS
+from .fetching.adapters import ADAPTERS
 from .models import ProductResponse, SearchResponse
-from .service import search_products
+from .fetching.service import search_products
 
 logging.basicConfig(
     level=logging.INFO,

@@ -6,7 +6,7 @@ import warnings
 
 import httpx
 
-from .models import ProductResult
+from ..models import ProductResult
 
 logger = logging.getLogger(__name__)
 

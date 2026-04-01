@@ -11,7 +11,7 @@ from typing import Optional
 from curl_cffi.requests import AsyncSession
 
 from ..core import matches_query
-from ..models import Installment, ProductResult
+from ...models import Installment, ProductResult
 from ..adapters.base import StoreAdapter
 
 _session = AsyncSession(impersonate="chrome120")

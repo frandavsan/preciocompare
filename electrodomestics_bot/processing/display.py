@@ -1,6 +1,6 @@
 from typing import Optional
 
-from .models import ProductResult
+from ..models import ProductResult
 from .matching import ProductGroup
 
 

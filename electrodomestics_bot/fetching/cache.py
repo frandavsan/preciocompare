@@ -28,7 +28,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
-from .models import Installment, ProductResult
+from ..models import Installment, ProductResult
 
 # ---------------------------------------------------------------------------
 # Paths & constants

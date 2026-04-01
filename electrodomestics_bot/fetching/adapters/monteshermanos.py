@@ -8,8 +8,8 @@ from urllib.parse import quote
 from bs4 import BeautifulSoup
 
 from ..core import http_get, matches_query
-from ..models import Installment, ProductResult
-from ..adapters.base import StoreAdapter
+from ...models import Installment, ProductResult
+from .base import StoreAdapter
 
 _SKU_RE = re.compile(r"f-(\d+)-")
 _PRICE_RE = re.compile(r"[\d.,]+")

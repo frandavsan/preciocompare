@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from . import cache
 from .adapters import ADAPTERS
 from .core import search_all_stores
-from .models import ProductResult
+from ..models import ProductResult
 
 logger = logging.getLogger(__name__)
 

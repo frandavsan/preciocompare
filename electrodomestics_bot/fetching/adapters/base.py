@@ -4,7 +4,7 @@
 # See CLAUDE.md for the full architecture guideline.
 from abc import ABC, abstractmethod
 
-from ..models import ProductResult
+from ...models import ProductResult
 
 
 class StoreAdapter(ABC):

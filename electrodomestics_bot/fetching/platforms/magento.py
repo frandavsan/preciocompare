@@ -10,7 +10,7 @@ from urllib.parse import quote
 from bs4 import BeautifulSoup
 
 from ..core import http_get, matches_query
-from ..models import Installment, ProductResult
+from ...models import Installment, ProductResult
 from ..adapters.base import StoreAdapter
 
 # Ordered keyword → card name map for Summa Solutions logo filename parsing.

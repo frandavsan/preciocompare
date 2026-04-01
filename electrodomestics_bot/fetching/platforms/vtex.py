@@ -6,7 +6,7 @@ from typing import Optional
 from urllib.parse import quote
 
 from ..core import http_get, http_post, matches_query
-from ..models import Installment, ProductResult
+from ...models import Installment, ProductResult
 from ..adapters.base import StoreAdapter
 
 

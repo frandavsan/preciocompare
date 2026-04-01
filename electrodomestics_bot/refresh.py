@@ -22,8 +22,8 @@ import sys
 import time
 from collections import defaultdict
 
-from . import cache
-from .adapters import ADAPTERS
+from .fetching import cache
+from .fetching.adapters import ADAPTERS
 
 logger = logging.getLogger(__name__)
 
