@@ -9,7 +9,9 @@ from contextlib import contextmanager
 from . import cache
 from .adapters import ADAPTERS
 from .core import search_all_stores
-from ..models import ProductResult
+from dataclasses import replace
+
+from ..models import ProductResult, StoreSearchResult
 from ..monitoring import anomaly as _anomaly
 from ..monitoring.alerts import alert_anomalies as _alert_anomalies
 from ..monitoring.collector import make_run_callback
@@ -35,9 +37,9 @@ def _db():
 
 async def search_products(
     query: str, detail: bool = False, use_cache: bool = True, check_shipping: bool = True
-) -> dict[str, list[ProductResult]]:
+) -> dict[str, StoreSearchResult]:
     """
-    Returns results for every store.
+    Returns a StoreSearchResult for every store, carrying both products and status.
 
     use_cache=True (default for API): serve from DB for known queries; live fetch + insert for new ones.
     use_cache=False (default for CLI): always fetch live, upsert fresh data to DB.
@@ -54,35 +56,33 @@ async def search_products(
             cached_stores = []
             new_stores = list(ADAPTERS)
 
-        all_results: dict[str, list[ProductResult]] = {}
+        all_results: dict[str, StoreSearchResult] = {}
 
-        # Cached stores: instant DB lookup
         for adapter in cached_stores:
-            all_results[adapter.name] = cache.get_query_products(conn, adapter.name, query)
+            products = cache.get_query_products(conn, adapter.name, query)
+            all_results[adapter.name] = StoreSearchResult(products=products, status="ok")
 
         if new_stores:
-            # Each store gets its own coroutine; all run concurrently via gather.
-            # Per-store-query locks still prevent duplicate scrapes — each coroutine
-            # acquires only its own store's lock, so stores never block each other.
-            async def _fetch_one(adapter) -> tuple[str, list]:
+            async def _fetch_one(adapter) -> tuple[str, StoreSearchResult]:
                 key = _lock_key(adapter.name, query)
                 async with _query_locks[key]:
                     # Re-check cache inside the lock — another request may have filled it.
                     if use_cache and cache.has_query(conn, adapter.name, query):
-                        return adapter.name, cache.get_query_products(conn, adapter.name, query)
+                        products = cache.get_query_products(conn, adapter.name, query)
+                        return adapter.name, StoreSearchResult(products=products, status="ok")
 
                     live = await search_all_stores(
                         query, [adapter], detail=detail, check_shipping=check_shipping,
                         on_run=make_run_callback(query),
                     )
-                    live_results = live.get(adapter.name, [])
+                    ssr = live.get(adapter.name, StoreSearchResult())
+                    live_results = ssr.products
+
                     found = _anomaly.check(query, {adapter.name: live_results})
                     if found:
                         asyncio.create_task(_alert_anomalies(found))
 
                     if use_cache:
-                        # Preserve richer cached data: use DB version for existing products,
-                        # live version for products not yet in the DB.
                         final: list = []
                         new_products: list = []
                         for r in live_results:
@@ -95,20 +95,16 @@ async def search_products(
                         if new_products:
                             cache.insert_new_products(conn, adapter.name, new_products)
                     else:
-                        # Live mode: show fresh data, overwrite DB with latest prices.
                         final = live_results
                         if final:
                             cache.upsert_products(conn, adapter.name, final)
 
-                    # Only record the query if it returned results — a live fetch that
-                    # returns nothing may indicate a transient error and should not be
-                    # cached as "searched" so it can be retried next time.
                     if final:
                         cache.record_query(conn, adapter.name, query, [r.url for r in final])
 
-                    return adapter.name, final
+                    return adapter.name, replace(ssr, products=final)
 
-            for name, results in await asyncio.gather(*[_fetch_one(a) for a in new_stores]):
-                all_results[name] = results
+            for name, ssr in await asyncio.gather(*[_fetch_one(a) for a in new_stores]):
+                all_results[name] = ssr
 
-        return {a.name: all_results.get(a.name, []) for a in ADAPTERS}
+        return {a.name: all_results.get(a.name, StoreSearchResult()) for a in ADAPTERS}

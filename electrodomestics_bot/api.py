@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .fetching.adapters import ADAPTERS
-from .models import ProductResponse, SearchResponse
+from .models import ProductResponse, SearchResponse, StoreStatusResponse
 from .fetching.service import search_products
 from .monitoring import storage as _storage
 
@@ -35,14 +35,18 @@ async def generic_exception_handler(request: Request, exc: Exception):
 async def search(q: str, detail: bool = False):
     """Search all stores for a product model or SKU."""
     try:
-        results = await search_products(q, detail)
-        return SearchResponse(
-            query=q,
-            results={
-                store: [ProductResponse.from_dataclass(p) for p in products]
-                for store, products in results.items()
-            },
-        )
+        raw = await search_products(q, detail)
+        results = {}
+        store_status = {}
+        for store, ssr in raw.items():
+            results[store] = [ProductResponse.from_dataclass(p) for p in ssr.products]
+            store_status[store] = StoreStatusResponse(
+                status=ssr.status,
+                result_count=len(ssr.products),
+                error_detail=ssr.error_detail,
+                duration_ms=ssr.duration_ms,
+            )
+        return SearchResponse(query=q, results=results, store_status=store_status)
     except Exception as e:
         logger.error("Search failed for query '%s': %s", q, e)
         raise HTTPException(status_code=503, detail="Search failed")

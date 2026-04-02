@@ -8,7 +8,7 @@ from typing import Callable, Optional
 
 import httpx
 
-from ..models import ProductResult
+from ..models import ProductResult, StoreSearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -82,10 +82,10 @@ async def search_all_stores(
     detail: bool = False,
     check_shipping: bool = True,
     on_run: Optional[Callable] = None,
-) -> dict[str, list[ProductResult]]:
+) -> dict[str, StoreSearchResult]:
     """
-    Queries every store concurrently and returns filtered results per store.
-    Stores that fail are logged and returned as empty lists.
+    Queries every store concurrently and returns a StoreSearchResult per store,
+    carrying both the product list and the store's status (ok / error / timeout).
     Result order matches the order of the adapters list.
     When detail=True, adapters may perform extra requests for richer data (e.g. card names).
     When check_shipping=False, all shipping simulation calls are skipped and free_shipping
@@ -104,35 +104,50 @@ async def search_all_stores(
             if hasattr(adapter, "_free_shipping_override"):
                 adapter._free_shipping_override = False
 
-    async def _fetch(adapter):
+    async def _fetch(adapter) -> tuple[str, StoreSearchResult]:
         t0 = time.perf_counter()
         exc_captured: Optional[Exception] = None
         results: list[ProductResult] = []
+        status = "ok"
+        error_detail: Optional[str] = None
         try:
             raw = await adapter.search(query, detail)
             results = [r for r in raw if r.name and matches_query(r.name, query)]
+        except asyncio.TimeoutError as e:
+            logger.warning("%s timed out — %s", adapter.name, e)
+            exc_captured = e
+            status = "timeout"
+            error_detail = f"{type(e).__name__}: {e}"
         except Exception as e:
             logger.warning("%s failed — %s", adapter.name, e)
             exc_captured = e
+            status = "error"
+            error_detail = f"{type(e).__name__}: {e}"
         finally:
+            duration_ms = int((time.perf_counter() - t0) * 1000)
             if on_run is not None:
                 try:
                     on_run(
                         adapter.name,
-                        int((time.perf_counter() - t0) * 1000),
+                        duration_ms,
                         results,
                         exc_captured,
                     )
                 except Exception:
                     pass
-        return adapter.name, results
+        return adapter.name, StoreSearchResult(
+            products=results,
+            status=status,
+            error_detail=error_detail,
+            duration_ms=duration_ms,
+        )
 
     pairs = await asyncio.gather(*[_fetch(a) for a in adapters])
     results = dict(pairs)
 
     if not check_shipping:
-        for store_results in results.values():
-            for product in store_results:
+        for ssr in results.values():
+            for product in ssr.products:
                 product.free_shipping = False
 
     return results

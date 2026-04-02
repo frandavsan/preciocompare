@@ -1,6 +1,6 @@
 from typing import Optional
 
-from ..models import ProductResult
+from ..models import ProductResult, StoreSearchResult
 from .matching import ProductGroup
 
 
@@ -26,15 +26,21 @@ def format_price(price: Optional[float]) -> str:
 
 def print_results(
     query: str,
-    all_results: dict[str, list[ProductResult]],
+    all_results: dict[str, StoreSearchResult],
     limit: Optional[int] = None,
 ) -> None:
     print(f"\n  Query: {_B}{query}{_R}\n")
 
-    for store, products in all_results.items():
+    for store, ssr in all_results.items():
+        products = ssr.products
         print(f"{_DIM}{_LINE}{_R}")
         if not products:
-            print(f"  {_CYAN}{_B}{store.upper()}{_R}  {_DIM}—  no results found{_R}")
+            if ssr.status == "error":
+                print(f"  {_CYAN}{_B}{store.upper()}{_R}  {_RED}—  error (store unreachable){_R}")
+            elif ssr.status == "timeout":
+                print(f"  {_CYAN}{_B}{store.upper()}{_R}  {_RED}—  timed out{_R}")
+            else:
+                print(f"  {_CYAN}{_B}{store.upper()}{_R}  {_DIM}—  no results found{_R}")
             continue
 
         n = len(products)
@@ -79,7 +85,7 @@ def print_comparison(group: ProductGroup) -> None:
 
     print(f"\n  {_B}Product:{_R} {group.canonical_name}")
     print(f"{_DIM}{_LINE}{_R}")
-    print(f"  {_DIM}{'Store':<12}{'Price':>12}    {'Best installment':<26}Shipping{_R}")
+    print(f"  {_DIM}{'Store':<12}{'Price':>12}    {'Best installment':<20}{'Shipping':<12}Link{_R}")
     print(f"{_DIM}{_LINE}{_R}")
 
     for store, prod in sorted(group.products.items()):
@@ -88,26 +94,42 @@ def print_comparison(group: ProductGroup) -> None:
 
         if prod.installments:
             best = max(prod.installments, key=lambda i: i.count)
-            cards_plain = f" ({', '.join(best.cards)})" if best.cards else ""
-            inst_plain  = f"{best.count}x {format_price(best.amount)}{cards_plain}"
-            cards_col   = f" {_DIM}({', '.join(best.cards)}){_R}" if best.cards else ""
-            inst_col    = f"{_YLW}{best.count}x {format_price(best.amount)}{_R}{cards_col}"
+            inst_plain = f"{best.count}x {format_price(best.amount)}"
+            inst_col   = f"{_YLW}{inst_plain}{_R}"
         else:
             inst_plain = "—"
             inst_col   = f"{_DIM}—{_R}"
 
-        shipping_col = f"{_GREEN}FREE{_R}" if prod.free_shipping else f"{_DIM}—{_R}"
+        shipping_col = f"{_GREEN}FREE{_R}        " if prod.free_shipping else f"{_DIM}—{_R}           "
 
-        # Colored variants — padding computed from plain-text lengths
         store_col = (f"{_CYAN}{_B}{store}{_R}" if is_cheapest else store)
         price_col = (f"{_BGRN}{price_str}{_R}"  if is_cheapest else f"{_GREEN}{price_str}{_R}")
 
         store_pad = " " * max(0, 12 - len(store))
         price_pad = " " * max(0, 12 - len(price_str))
-        inst_pad  = " " * max(0, 26 - len(inst_plain))
+        inst_pad  = " " * max(0, 20 - len(inst_plain))
 
-        print(f"  {store_col}{store_pad}{price_pad}{price_col}    {inst_col}{inst_pad}{shipping_col}")
+        print(f"  {store_col}{store_pad}{price_pad}{price_col}    {inst_col}{inst_pad}{shipping_col}{_DIM}{prod.url}{_R}")
 
     print(f"{_DIM}{_LINE}{_R}")
     cheapest_price = format_price(cheapest_store[1].price)
-    print(f"  Cheapest: {_CYAN}{_B}{cheapest_store[0]}{_R}  {_BGRN}${cheapest_price}{_R}\n")
+    print(f"  Cheapest: {_CYAN}{_B}{cheapest_store[0]}{_R}  {_BGRN}${cheapest_price}{_R}")
+
+    prices = [p.price for p in group.products.values() if p.price is not None]
+    if len(prices) > 1:
+        avg = sum(prices) / len(prices)
+        cheapest_val = cheapest_store[1].price
+        most_expensive_val = max(prices)
+        cheap_pct  = (cheapest_val - avg) / avg * 100
+        exp_pct    = (most_expensive_val - avg) / avg * 100
+        spread_pct = (cheapest_val - most_expensive_val) / most_expensive_val * 100
+        _W = 30  # label column width
+        avg_str    = format_price(avg)
+        cheap_str  = f"{cheap_pct:+.1f}%"
+        exp_str    = f"{exp_pct:+.1f}%"
+        spread_str = f"{spread_pct:+.1f}%"
+        print(f"  {_DIM}{'Average price:':<{_W}}{_R}{_GREEN}{avg_str:>10}{_R}")
+        print(f"  {_DIM}{'Cheapest vs average:':<{_W}}{_R}{_BGRN}{cheap_str:>10}{_R}")
+        print(f"  {_DIM}{'Most expensive vs average:':<{_W}}{_R}{_YLW}{exp_str:>10}{_R}")
+        print(f"  {_DIM}{'Cheapest vs most expensive:':<{_W}}{_R}{_BGRN}{spread_str:>10}{_R}")
+    print()

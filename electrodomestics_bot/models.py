@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Optional, TYPE_CHECKING
+from dataclasses import dataclass, field, replace
+from typing import Literal, Optional, TYPE_CHECKING
+
+StoreStatus = Literal["ok", "error", "timeout"]
 
 
 @dataclass
@@ -12,6 +14,15 @@ class Installment:
 
     def to_dict(self) -> dict:
         return {"count": self.count, "amount": self.amount, "cards": self.cards}
+
+
+@dataclass
+class StoreSearchResult:
+    """Per-store result from search_all_stores — carries status alongside products."""
+    products: list["ProductResult"] = field(default_factory=list)
+    status: StoreStatus = "ok"
+    error_detail: Optional[str] = None    # e.g. "ConnectionError: 503"
+    duration_ms: Optional[int] = None
 
 
 @dataclass
@@ -82,6 +93,14 @@ class ProductResponse(BaseModel):
         )
 
 
+class StoreStatusResponse(BaseModel):
+    status: StoreStatus
+    result_count: int
+    error_detail: Optional[str] = None
+    duration_ms: Optional[int] = None
+
+
 class SearchResponse(BaseModel):
     query: str
     results: dict[str, list[ProductResponse]]
+    store_status: dict[str, StoreStatusResponse] = {}

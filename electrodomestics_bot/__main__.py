@@ -59,13 +59,13 @@ def main() -> None:
         print_results(query, all_results, limit=_PREVIEW_LIMIT)
         print(f"  Completed in {elapsed:.1f}s\n")
 
-        stores_with_results = [name for name, products in all_results.items() if products]
+        stores_with_results = [name for name, ssr in all_results.items() if ssr.products]
         if stores_with_results:
             options = " / ".join(stores_with_results) + " / all / n"
             choice = input(f"  Show more? [{options}]: ").strip().lower()
             if choice == "all":
                 print_results(query, all_results)
-            elif choice in all_results and all_results[choice]:
+            elif choice in all_results and all_results[choice].products:
                 print_results(query, {choice: all_results[choice]})
 
         if not raw_mode and stores_with_results:

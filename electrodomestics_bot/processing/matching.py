@@ -19,7 +19,9 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
-from ..models import ProductResult
+from dataclasses import replace
+
+from ..models import ProductResult, StoreSearchResult
 
 
 @dataclass
@@ -145,19 +147,21 @@ def _keys_match(a: frozenset[str], b: frozenset[str]) -> bool:
 
 
 def dedup_results(
-    all_results: dict[str, list[ProductResult]],
-) -> dict[str, list[ProductResult]]:
+    all_results: dict[str, StoreSearchResult],
+) -> dict[str, StoreSearchResult]:
     """
     Within each store, collapse duplicate listings of the same product
     (marketplace sellers listing the same item) down to the cheapest one.
 
     Uses _keys_match so slightly different names for the same product
     (e.g. one seller adds "Google TV", another omits it) are still caught.
+    Preserves the StoreSearchResult status metadata through deduplication.
     """
-    out: dict[str, list[ProductResult]] = {}
-    for store, products in all_results.items():
+    out: dict[str, StoreSearchResult] = {}
+    for store, ssr in all_results.items():
+        products = ssr.products
         if len(products) <= 1:
-            out[store] = products
+            out[store] = ssr
             continue
         kept: list[tuple[ProductResult, frozenset[str]]] = []
         for prod in products:
@@ -171,11 +175,11 @@ def dedup_results(
                     break
             if not merged:
                 kept.append((prod, keys))
-        out[store] = [p for p, _ in kept]
+        out[store] = replace(ssr, products=[p for p, _ in kept])
     return out
 
 
-def group_results(all_results: dict[str, list[ProductResult]]) -> list[ProductGroup]:
+def group_results(all_results: dict[str, StoreSearchResult]) -> list[ProductGroup]:
     """
     Group products from different stores by product identity.
 
@@ -195,8 +199,8 @@ def group_results(all_results: dict[str, list[ProductResult]]) -> list[ProductGr
     but single-store groups are returned too — the caller decides what to show.
     """
     flat: list[tuple[str, ProductResult, frozenset[str], str | None]] = []
-    for store, prods in all_results.items():
-        for prod in prods:
+    for store, ssr in all_results.items():
+        for prod in ssr.products:
             keys = extract_keys(prod.name)
             flat.append((store, prod, keys, _detect_brand(keys)))
     if not flat:

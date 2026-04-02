@@ -72,7 +72,8 @@ async def run_all(adapters: Optional[list] = None) -> list[dict]:
 
         try:
             raw = await search_all_stores(query, [adapter], check_shipping=False)
-            actual_count = len(raw.get(store, []))
+            ssr = raw.get(store)
+            actual_count = len(ssr.products) if ssr else 0
             passed = actual_count >= expected_min
             if not passed:
                 failure_reason = f"got {actual_count}, expected >= {expected_min}"
