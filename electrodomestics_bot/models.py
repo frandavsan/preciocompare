@@ -55,25 +55,37 @@ class ProductResult:
 # Pydantic response models (API layer)
 # ---------------------------------------------------------------------------
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class InstallmentResponse(BaseModel):
-    count: int
-    amount: float
-    cards: list[str]
+    count: int = Field(description="Number of installments")
+    amount: float = Field(description="Amount per installment in ARS")
+    cards: list[str] = Field(
+        description="Card networks or banks offering this option. "
+        "Empty in fast mode (detail=false); populated in detail mode."
+    )
 
 
 class ProductResponse(BaseModel):
-    name: str
-    sku: Optional[str]
-    price: Optional[float]
-    currency: str
-    url: str
-    installments: list[InstallmentResponse]
-    free_shipping: bool
-    international: Optional[bool]
-    available: bool
+    name: str = Field(description="Product name as listed by the store")
+    sku: Optional[str] = Field(description="Store SKU or reference ID")
+    price: Optional[float] = Field(
+        description="Final selling price in ARS. Null if the store did not return a price."
+    )
+    currency: str = Field(description="Currency code, always 'ARS'")
+    url: str = Field(description="Direct URL to the product page on the store")
+    installments: list[InstallmentResponse] = Field(
+        description="Interest-free installment options only. Empty list if none available."
+    )
+    free_shipping: bool = Field(
+        description="Whether home delivery is free (based on Buenos Aires postal code)"
+    )
+    international: Optional[bool] = Field(
+        description="True = international marketplace product, "
+        "False = domestic, null = concept not applicable to this store"
+    )
+    available: bool = Field(description="Whether the product is currently in stock")
 
     @classmethod
     def from_dataclass(cls, p: "ProductResult") -> "ProductResponse":
@@ -94,13 +106,29 @@ class ProductResponse(BaseModel):
 
 
 class StoreStatusResponse(BaseModel):
-    status: StoreStatus
-    result_count: int
-    error_detail: Optional[str] = None
-    duration_ms: Optional[int] = None
+    status: StoreStatus = Field(
+        description="'ok' = results returned successfully, "
+        "'error' = store fetch failed, "
+        "'timeout' = store did not respond in time"
+    )
+    result_count: int = Field(description="Number of matching products returned by this store")
+    error_detail: Optional[str] = Field(
+        None,
+        description="Error type and message (e.g. 'ConnectionError: 503'). "
+        "Only populated when status is 'error' or 'timeout'.",
+    )
+    duration_ms: Optional[int] = Field(
+        None, description="Wall-clock time for this store's fetch in milliseconds"
+    )
 
 
 class SearchResponse(BaseModel):
-    query: str
-    results: dict[str, list[ProductResponse]]
-    store_status: dict[str, StoreStatusResponse] = {}
+    query: str = Field(description="The original search query")
+    results: dict[str, list[ProductResponse]] = Field(
+        description="Products grouped by store name. Every configured store appears as a key, "
+        "even if it returned zero results."
+    )
+    store_status: dict[str, StoreStatusResponse] = Field(
+        default={},
+        description="Per-store fetch metadata: status, result count, timing, and error details",
+    )
