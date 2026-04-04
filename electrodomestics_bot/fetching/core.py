@@ -96,14 +96,6 @@ async def search_all_stores(
                          exc: Exception | None) -> None
              Exceptions from on_run are suppressed — monitoring never crashes a search.
     """
-    for adapter in adapters:
-        if check_shipping:
-            if hasattr(adapter, "postal_code"):
-                adapter.postal_code = "1428"
-        else:
-            if hasattr(adapter, "_free_shipping_override"):
-                adapter._free_shipping_override = False
-
     async def _fetch(adapter) -> tuple[str, StoreSearchResult]:
         t0 = time.perf_counter()
         exc_captured: Optional[Exception] = None
@@ -111,7 +103,7 @@ async def search_all_stores(
         status = "ok"
         error_detail: Optional[str] = None
         try:
-            raw = await adapter.search(query, detail)
+            raw = await adapter.search(query, detail, check_shipping)
             results = [r for r in raw if r.name and matches_query(r.name, query)]
         except asyncio.TimeoutError as e:
             logger.warning("%s timed out — %s", adapter.name, e)

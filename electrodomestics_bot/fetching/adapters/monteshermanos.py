@@ -40,7 +40,7 @@ class MontesHermanosAdapter(StoreAdapter):
     name = "monteshermanos"
     base_url = "https://www.monteshermanos.com.ar"
 
-    async def search(self, query: str, detail: bool = False) -> list[ProductResult]:
+    async def search(self, query: str, detail: bool = False, check_shipping: bool = True) -> list[ProductResult]:
         url = f"{self.base_url}/busqueda/?keyword={quote(query)}"
         resp = await http_get(url)
         soup = BeautifulSoup(resp.text, "lxml")

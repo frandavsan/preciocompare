@@ -27,7 +27,10 @@ class VtexAdapter(StoreAdapter):
     base_url: str
 
     # --- subclasses may override ---
-    postal_code: str = "1425"   # Buenos Aires; change for non-AR stores
+    # Any CABA (Ciudad Autónoma de Buenos Aires) postal code works — shipping APIs
+    # return identical results for all CABA codes. Non-CABA codes may return zero SLAs.
+    # Override in adapters for stores in other regions (e.g. Castillo uses "4000" for Tucumán).
+    postal_code: str = "1425"
     verify_ssl: bool = True
     _free_shipping_override: Optional[bool] = None  # set to skip shipping simulation entirely
 
@@ -39,7 +42,7 @@ class VtexAdapter(StoreAdapter):
     def simulation_url(self) -> str:
         return f"{self.base_url}/api/checkout/pub/orderForms/simulation"
 
-    async def search(self, query: str, detail: bool = False) -> list[ProductResult]:
+    async def search(self, query: str, detail: bool = False, check_shipping: bool = True) -> list[ProductResult]:
         all_products = await self._fetch_all_products(quote(query))
 
         # Pre-filter before shipping simulations — avoids POSTing for products
@@ -49,15 +52,15 @@ class VtexAdapter(StoreAdapter):
             if p.get("productName") and matches_query(p["productName"], query)
         ]
 
-        # Run shipping simulations concurrently for available products only.
+        effective_override = self._free_shipping_override if check_shipping else False
         available_indices = [i for i, p in enumerate(products) if self._is_available(p)]
-        if available_indices and self._free_shipping_override is None:
+        if available_indices and effective_override is None:
             shipping_results = await asyncio.gather(
                 *[self._check_free_shipping(products[i]) for i in available_indices]
             )
             shipping_map = dict(zip(available_indices, shipping_results))
         elif available_indices:
-            shipping_map = {i: self._free_shipping_override for i in available_indices}
+            shipping_map = {i: effective_override for i in available_indices}
         else:
             shipping_map = {}
 

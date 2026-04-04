@@ -28,14 +28,14 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
+from ..config import settings
 from ..models import Installment, ProductResult
 
 # ---------------------------------------------------------------------------
 # Paths & constants
 # ---------------------------------------------------------------------------
 
-_PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
-DB_PATH = os.path.join(_PROJECT_ROOT, "data", "cache.db")
+DB_PATH = os.path.join(settings.data_dir, "cache.db")
 
 SCHEMA_VERSION = 2
 

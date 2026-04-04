@@ -11,8 +11,10 @@ class StoreAdapter(ABC):
     name: str
 
     @abstractmethod
-    async def search(self, query: str, detail: bool = False) -> list[ProductResult]:
+    async def search(self, query: str, detail: bool = False, check_shipping: bool = True) -> list[ProductResult]:
         """Search the store and return all matching products for the given query.
         When detail=True, implementations may perform extra requests to return richer data
-        (e.g. full card names per installment option) at the cost of extra latency."""
+        (e.g. full card names per installment option) at the cost of extra latency.
+        When check_shipping=False, shipping simulation is skipped and free_shipping=False
+        for all products."""
         ...

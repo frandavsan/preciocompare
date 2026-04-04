@@ -33,12 +33,13 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
+from ..config import settings
+
 # ---------------------------------------------------------------------------
 # Path and version
 # ---------------------------------------------------------------------------
 
-_PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
-DB_PATH = os.path.join(_PROJECT_ROOT, "data", "monitoring.db")
+DB_PATH = os.path.join(settings.data_dir, "monitoring.db")
 
 SCHEMA_VERSION = 1
 

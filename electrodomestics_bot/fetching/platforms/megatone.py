@@ -96,7 +96,7 @@ class MegatoneAdapter(StoreAdapter):
     def _origin_headers(self) -> dict:
         return {"Origin": self.base_url, "Referer": self.base_url + "/"}
 
-    async def search(self, query: str, detail: bool = False) -> list[ProductResult]:
+    async def search(self, query: str, detail: bool = False, check_shipping: bool = True) -> list[ProductResult]:
         raw = await self._fetch_all_products(query)
         matching = [p for p in raw if matches_query(p.get("title", ""), query)]
 
@@ -104,6 +104,8 @@ class MegatoneAdapter(StoreAdapter):
         eligible = []
         for p in matching:
             result = self._parse_product(p)
+            if not check_shipping:
+                result.free_shipping = False
             results.append(result)
             if result.price and result.sku and self._has_sin_interes(p):
                 eligible.append(result)

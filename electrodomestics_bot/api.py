@@ -8,13 +8,15 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from .auth import require_auth
+from .config import settings
 from .fetching.adapters import ADAPTERS
 from .models import ProductResponse, SearchResponse, StoreStatusResponse
 from .fetching.service import search_products
 from .monitoring import storage as _storage
+from . import scheduler as _scheduler
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=settings.log_level,
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
 )
 logger = logging.getLogger(__name__)
@@ -33,10 +35,20 @@ app.state.limiter = limiter
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def _startup():
+    _scheduler.start()
+
+
+@app.on_event("shutdown")
+async def _shutdown():
+    _scheduler.stop()
 
 
 @app.exception_handler(RateLimitExceeded)
@@ -116,9 +128,20 @@ async def stores(request: Request, user: dict = Depends(require_auth)):
     ]
 
 
-@app.get("/health", summary="Health check")
+@app.get("/health", summary="Health check (public)")
 async def health():
-    """Returns system health: store count, last canary probe results, last refresh summary, and monitoring DB size."""
+    """Public liveness probe — returns minimal status for load balancers and uptime monitors."""
+    return {"status": "ok", "stores": len(ADAPTERS)}
+
+
+@app.get(
+    "/health/detail",
+    summary="Detailed health check",
+    description="Full operational health: scheduler state, canary results, last refresh summary, and monitoring DB size.",
+    responses={401: {"description": "Missing or invalid Supabase JWT"}},
+)
+async def health_detail(user: dict = Depends(require_auth)):
+    """Returns full system health — requires authentication."""
     canary_status = _storage.get_last_canary_per_store()
     last_refresh = _storage.get_last_refresh()
     db_size_mb = _storage.get_db_size_mb()
@@ -126,6 +149,7 @@ async def health():
     return {
         "status": "ok",
         "stores": len(ADAPTERS),
+        "scheduler": _scheduler.get_status(),
         "canary": {
             store: {
                 "passed": bool(data["passed"]),
@@ -141,8 +165,12 @@ async def health():
     }
 
 
-@app.get("/health/anomalies", summary="List open anomalies")
-async def health_anomalies():
+@app.get(
+    "/health/anomalies",
+    summary="List open anomalies",
+    responses={401: {"description": "Missing or invalid Supabase JWT"}},
+)
+async def health_anomalies(user: dict = Depends(require_auth)):
     """Returns all unacknowledged anomalies (null prices, zero results, installment drops) from the monitoring DB."""
     anomalies = _storage.get_open_anomalies()
     return {"count": len(anomalies), "anomalies": anomalies}
@@ -151,9 +179,12 @@ async def health_anomalies():
 @app.post(
     "/health/anomalies/{anomaly_id}/acknowledge",
     summary="Acknowledge an anomaly",
-    responses={404: {"description": "Anomaly ID not found"}},
+    responses={
+        401: {"description": "Missing or invalid Supabase JWT"},
+        404: {"description": "Anomaly ID not found"},
+    },
 )
-async def acknowledge_anomaly(anomaly_id: int):
+async def acknowledge_anomaly(anomaly_id: int, user: dict = Depends(require_auth)):
     """Marks a single anomaly as acknowledged so it no longer appears in /health/anomalies."""
     updated = _storage.acknowledge_anomaly(anomaly_id)
     if not updated:

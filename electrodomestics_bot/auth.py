@@ -6,12 +6,12 @@ Supabase project's JWT secret. Protected routes add ``user=Depends(require_auth)
 to receive the decoded token payload (contains ``sub``, ``email``, ``role``, etc.).
 """
 
-import os
-
 from fastapi import HTTPException, Request
 from jose import jwt, JWTError
 
-SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")
+from .config import settings
+
+SUPABASE_JWT_SECRET = settings.supabase_jwt_secret
 ALGORITHM = "HS256"
 
 

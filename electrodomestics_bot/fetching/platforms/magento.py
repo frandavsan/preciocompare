@@ -51,7 +51,7 @@ class MagentoAdapter(StoreAdapter):
     def search_result_url(self) -> str:
         return f"{self.base_url}/catalogsearch/result/index/?q={{}}&p={{}}"
 
-    async def search(self, query: str, detail: bool = False) -> list[ProductResult]:
+    async def search(self, query: str, detail: bool = False, check_shipping: bool = True) -> list[ProductResult]:
         quoted = quote(query)
         all_items = await self._fetch_all_search_pages(quoted)
         items = [i for i in all_items if i.get("name") and matches_query(i["name"], query)]

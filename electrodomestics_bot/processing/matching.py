@@ -86,6 +86,12 @@ _BRANDS: frozenset[str] = frozenset({
     "smartlife", "telefunken", "columbia",
 })
 
+# Matches unit-spec tokens produced by _UNIT_SUBS (e.g. "128gb", "570l", "1000rpm").
+# These look like model codes (letters + digits) but are product attributes, not identifiers.
+_UNIT_SPEC_RE: re.Pattern = re.compile(
+    r'^\d+(?:gb|tb|mb|kg|l|rpm|w|hz|v|ah|mah)$'
+)
+
 # Unit normalization: collapse "12 Gb" → "12gb", "5 Kg" → "5kg", etc.
 # Applied before tokenization so numeric specs match across stores.
 _UNIT_SUBS: list[tuple[re.Pattern, str]] = [
@@ -131,19 +137,38 @@ def _detect_brand(keys: frozenset[str]) -> str | None:
     return next((k for k in keys if k in _BRANDS), None)
 
 
+def _has_model_code(tokens: frozenset[str]) -> bool:
+    """True if any token is a model code (letters + digits, ≥4 chars, not a unit spec)."""
+    return any(
+        len(t) >= 4
+        and any(c.isalpha() for c in t)
+        and any(c.isdigit() for c in t)
+        and not _UNIT_SPEC_RE.match(t)
+        for t in tokens
+    )
+
+
 def _keys_match(a: frozenset[str], b: frozenset[str]) -> bool:
     """
     Two key sets match if:
       - The shorter is a subset of the longer (strict identity), OR
-      - ≥80% of the shorter set appears in the longer (handles English color
-        name asymmetry: "cosmic" survives the filter on one store but not another)
+      - They share a model code (alphanumeric identifier like "gs66sxsc") and
+        ≥50% of the shorter set appears in the longer, OR
+      - ≥80% of the shorter set appears in the longer (general fallback)
+
+    The adaptive threshold handles short product names where stores use
+    completely different descriptive words but agree on brand + model code.
     """
     if not a or not b:
         return False
     shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
     if shorter <= longer:
         return True
-    return len(shorter & longer) / len(shorter) >= 0.80
+    overlap = shorter & longer
+    ratio = len(overlap) / len(shorter)
+    if _has_model_code(overlap):
+        return ratio >= 0.50
+    return ratio >= 0.80
 
 
 def dedup_results(
@@ -218,20 +243,26 @@ def group_results(all_results: dict[str, StoreSearchResult]) -> list[ProductGrou
             continue
         assigned[i] = True
         group_stores: dict[str, ProductResult] = {store_i: prod_i}
+        group_keysets: dict[str, frozenset[str]] = {store_i: keys_i}
 
         for j, (store_j, prod_j, keys_j, brand_j) in enumerate(flat):
             if assigned[j] or store_j == store_i:
                 continue
             if brand_i is not None and brand_j is not None and brand_i != brand_j:
                 continue
-            if not _keys_match(keys_i, keys_j):
+            if not any(_keys_match(gk, keys_j) for gk in group_keysets.values()):
                 continue
             if store_j not in group_stores:
                 group_stores[store_j] = prod_j
+                group_keysets[store_j] = keys_j
             else:
                 # Store already represented — keep the product with higher overlap
-                if len(keys_i & keys_j) > len(keys_i & _prod_keys[id(group_stores[store_j])]):
+                existing_keys = _prod_keys[id(group_stores[store_j])]
+                best_overlap = max(len(gk & keys_j) for gk in group_keysets.values())
+                existing_overlap = max(len(gk & existing_keys) for gk in group_keysets.values())
+                if best_overlap > existing_overlap:
                     group_stores[store_j] = prod_j
+                    group_keysets[store_j] = keys_j
             assigned[j] = True
 
         canonical = max(group_stores.values(), key=lambda p: len(_prod_keys[id(p)]))

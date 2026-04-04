@@ -7,3 +7,5 @@ uvicorn>=0.29
 pydantic>=2.0
 python-jose[cryptography]>=3.3
 slowapi>=0.1.9
+pydantic-settings>=2.0
+apscheduler>=3.10,<4

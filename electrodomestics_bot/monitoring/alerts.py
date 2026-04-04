@@ -24,19 +24,20 @@ Public API:
 
 import asyncio
 import logging
-import os
 
 import httpx
 
+from ..config import settings
+
 logger = logging.getLogger(__name__)
 
-_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "8715732280:AAGguAAemvZ1-PuIGOenlytGa3Aaz2_pCX4")
-_CHAT_ID: str   = os.getenv("TELEGRAM_CHAT_ID",   "-5243473656")
-_ENABLED: bool  = os.getenv("TELEGRAM_ENABLED", "true").lower() not in ("false", "0", "no")
+_BOT_TOKEN: str = settings.telegram_bot_token
+_CHAT_ID: str   = settings.telegram_chat_id
+_ENABLED: bool  = settings.telegram_enabled
 
 # Minimum severity level that triggers a Telegram message.
 # "critical" → only critical anomalies; "warning" → warnings and critical.
-_MIN_SEVERITY: str = os.getenv("ALERT_MIN_SEVERITY", "critical")
+_MIN_SEVERITY: str = settings.alert_min_severity
 
 _SEVERITY_RANK: dict[str, int] = {"warning": 1, "critical": 2}
 _MIN_SEVERITY_RANK: int = _SEVERITY_RANK.get(_MIN_SEVERITY, 2)

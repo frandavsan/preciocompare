@@ -64,6 +64,8 @@ class FravegaAdapter(StoreAdapter):
     name: str
     base_url: str
     verify_ssl: bool = True
+    # Any CABA (Ciudad Autónoma de Buenos Aires) postal code works — shipping APIs
+    # return identical results for all CABA codes. Non-CABA codes may return zero SLAs.
     postal_code: str = "1425"
     _free_shipping_override: Optional[bool] = None
 
@@ -71,7 +73,7 @@ class FravegaAdapter(StoreAdapter):
     def _endpoint(self) -> str:
         return f"{self.base_url}/api/v1/rest/search"
 
-    async def search(self, query: str, detail: bool = False) -> list[ProductResult]:
+    async def search(self, query: str, detail: bool = False, check_shipping: bool = True) -> list[ProductResult]:
         raw = await self._fetch_all_products(query)
         results = []
         shipping_tasks = []  # list of (result_index, sku, seller_id)
@@ -107,10 +109,11 @@ class FravegaAdapter(StoreAdapter):
             if detail and sku_code:
                 detail_tasks.append((idx, sku_code))
 
+        effective_override = self._free_shipping_override if check_shipping else False
         if shipping_tasks:
-            if self._free_shipping_override is not None:
+            if effective_override is not None:
                 for idx, _, _ in shipping_tasks:
-                    results[idx].free_shipping = self._free_shipping_override
+                    results[idx].free_shipping = effective_override
             elif len(shipping_tasks) > _MAX_SHIPPING_CHECKS:
                 logger.debug(
                     "[fravega] %d shipping tasks exceed threshold (%d); skipping shipping checks",
