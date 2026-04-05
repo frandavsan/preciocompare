@@ -1,0 +1,24 @@
+{
+  "title": "Samsung Galaxy S26 Ultra 256GB",
+  "slug": "samsung-galaxy-s26-ultra-256gb",
+  "sellerCondition": ["international_seller"],
+  "installments": {
+    "values": [
+      {"name": "12 cuotas sin interés"},
+      {"name": "Envío gratis"}
+    ]
+  },
+  "skus": {
+    "results": [
+      {
+        "code": "SKU-S26-256",
+        "pricing": [
+          {"salePrice": 1899999.0}
+        ]
+      }
+    ]
+  },
+  "sellers": [
+    {"id": "seller-fravega-01"}
+  ]
+}

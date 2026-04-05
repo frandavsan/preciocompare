@@ -1,0 +1,82 @@
+{
+  "productId": "123456",
+  "productName": "Samsung Galaxy S26 Ultra 256GB",
+  "productReference": "SM-S926BZKDARO",
+  "link": "/samsung-galaxy-s26-ultra-256gb/p",
+  "categories": ["/Telefonía/Celulares/", "/Compra Internacional/"],
+  "productClusters": [
+    {"id": "628", "name": "Full Catalogo"},
+    {"id": "700", "name": "Compra Internacional"}
+  ],
+  "items": [
+    {
+      "itemId": "987654",
+      "referenceId": [
+        {"Key": "RefId", "Value": "SM-S926BZKD"}
+      ],
+      "sellers": [
+        {
+          "sellerId": "1",
+          "sellerDefault": false,
+          "commertialOffer": {
+            "Price": 0,
+            "AvailableQuantity": 0,
+            "Installments": []
+          }
+        },
+        {
+          "sellerId": "mktplace01",
+          "sellerDefault": true,
+          "commertialOffer": {
+            "Price": 1499999.99,
+            "AvailableQuantity": 15,
+            "Installments": [
+              {
+                "PaymentSystemName": "Visa",
+                "PaymentSystemGroupName": "creditCardPaymentGroup",
+                "NumberOfInstallments": 1,
+                "Value": 1499999.99,
+                "InterestRate": 0
+              },
+              {
+                "PaymentSystemName": "Visa",
+                "PaymentSystemGroupName": "creditCardPaymentGroup",
+                "NumberOfInstallments": 6,
+                "Value": 250000.0,
+                "InterestRate": 0
+              },
+              {
+                "PaymentSystemName": "Mastercard",
+                "PaymentSystemGroupName": "creditCardPaymentGroup",
+                "NumberOfInstallments": 6,
+                "Value": 250000.0,
+                "InterestRate": 0
+              },
+              {
+                "PaymentSystemName": "American Express",
+                "PaymentSystemGroupName": "creditCardPaymentGroup",
+                "NumberOfInstallments": 3,
+                "Value": 500000.0,
+                "InterestRate": 0
+              },
+              {
+                "PaymentSystemName": "Visa",
+                "PaymentSystemGroupName": "creditCardPaymentGroup",
+                "NumberOfInstallments": 12,
+                "Value": 125000.0,
+                "InterestRate": 5.99
+              },
+              {
+                "PaymentSystemName": "Débito Visa",
+                "PaymentSystemGroupName": "debitCardPaymentGroup",
+                "NumberOfInstallments": 3,
+                "Value": 500000.0,
+                "InterestRate": 0
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

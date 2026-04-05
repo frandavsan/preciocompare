@@ -1,10 +1,27 @@
 """Shared fixtures for the test suite."""
 
+import json
 import sqlite3
+from pathlib import Path
 
 import pytest
+from bs4 import BeautifulSoup
 
 from electrodomestics_bot.models import Installment, ProductResult, StoreSearchResult
+
+# ---------------------------------------------------------------------------
+# Snapshot helpers — load recorded API/HTML fixtures from tests/snapshots/
+# ---------------------------------------------------------------------------
+
+SNAPSHOTS = Path(__file__).parent / "snapshots"
+
+
+def load_snapshot(name: str) -> dict:
+    return json.loads((SNAPSHOTS / name).read_text(encoding="utf-8"))
+
+
+def load_snapshot_soup(name: str) -> BeautifulSoup:
+    return BeautifulSoup((SNAPSHOTS / name).read_text(encoding="utf-8"), "lxml")
 
 
 # ---------------------------------------------------------------------------

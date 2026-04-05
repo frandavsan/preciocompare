@@ -1,0 +1,8 @@
+{
+  "resumen": [
+    {"cuotas": "12", "tasaDirecta": 0, "valor": 149916.67, "tarjeta": "VISA"},
+    {"cuotas": "6", "tasaDirecta": 0, "valor": 299833.33, "tarjeta": "VISA"},
+    {"cuotas": "3", "tasaDirecta": 0, "valor": 599666.67, "tarjeta": "VISA"},
+    {"cuotas": "18", "tasaDirecta": 5.5, "valor": 120000.0, "tarjeta": "VISA"}
+  ]
+}

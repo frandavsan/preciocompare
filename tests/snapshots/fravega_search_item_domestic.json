@@ -1,0 +1,23 @@
+{
+  "title": "Heladera Samsung 394L No Frost",
+  "slug": "heladera-samsung-394l-no-frost",
+  "sellerCondition": [],
+  "installments": {
+    "values": [
+      {"name": "18 cuotas sin interés"}
+    ]
+  },
+  "skus": {
+    "results": [
+      {
+        "code": "SKU-HEL-394",
+        "pricing": [
+          {"salePrice": 899000.0}
+        ]
+      }
+    ]
+  },
+  "sellers": [
+    {"id": "seller-fravega-main"}
+  ]
+}

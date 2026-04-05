@@ -1,0 +1,38 @@
+{
+  "productId": "123456",
+  "productName": "Samsung Galaxy S26 Ultra 256GB",
+  "productReference": "SM-S926BZKDARO",
+  "link": "https://www.teststore.com.ar/samsung-galaxy-s26-ultra-256gb/p",
+  "categories": ["/Telefonía/Celulares/"],
+  "productClusters": {
+    "628": "Full Catalogo",
+    "700": "Compra Internacional"
+  },
+  "items": [
+    {
+      "itemId": "987654",
+      "referenceId": [
+        {"Key": "RefId", "Value": "SM-S926BZKD"}
+      ],
+      "sellers": [
+        {
+          "sellerId": "1",
+          "sellerDefault": true,
+          "commertialOffer": {
+            "Price": 1499999.99,
+            "AvailableQuantity": 15,
+            "Installments": [
+              {
+                "PaymentSystemName": "Visa",
+                "PaymentSystemGroupName": "creditCardPaymentGroup",
+                "NumberOfInstallments": 6,
+                "Value": 250000.0,
+                "InterestRate": 0
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

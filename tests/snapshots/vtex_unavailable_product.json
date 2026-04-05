@@ -1,0 +1,25 @@
+{
+  "productId": "999888",
+  "productName": "Samsung Galaxy S25 FE 128GB",
+  "productReference": "SM-S25FE",
+  "link": "/samsung-galaxy-s25-fe-128gb/p",
+  "categories": ["/Telefonía/Celulares/"],
+  "productClusters": [],
+  "items": [
+    {
+      "itemId": "111222",
+      "referenceId": [],
+      "sellers": [
+        {
+          "sellerId": "1",
+          "sellerDefault": true,
+          "commertialOffer": {
+            "Price": 899999.0,
+            "AvailableQuantity": 0,
+            "Installments": []
+          }
+        }
+      ]
+    }
+  ]
+}

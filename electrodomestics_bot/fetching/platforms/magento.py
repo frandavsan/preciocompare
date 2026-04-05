@@ -244,4 +244,5 @@ class MagentoAdapter(StoreAdapter):
                 if keyword in fname and card_name not in seen:
                     seen.add(card_name)
                     cards.append(card_name)
+                    break
         return cards
