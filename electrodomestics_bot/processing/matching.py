@@ -104,6 +104,10 @@ _UNIT_SUBS: list[tuple[re.Pattern, str]] = [
     # Strip /suffix from model codes: "58PUD7310/77" → "58PUD7310"
     # Only strip when the suffix is 1-4 characters (avoids touching real tokens)
     (re.compile(r'([A-Z0-9]{4,})/[A-Z0-9]{1,4}\b', re.IGNORECASE), r'\1'),
+    # Strip 2-letter country/region suffixes appended directly to long model codes:
+    # "WW95AA046BXUBG" → "WW95AA046BXU" (BG = Argentina Samsung suffix).
+    # Only fires on tokens ≥10 chars so short codes like "A16" are unaffected.
+    (re.compile(r'([A-Z0-9]{8,})(AR|BG|CL|BR|MX|UY|PE|CO)\b', re.IGNORECASE), r'\1'),
 ]
 
 
@@ -124,12 +128,38 @@ def extract_keys(name: str) -> frozenset[str]:
       2. Unit normalization ("12 Gb" → "12gb")
       3. Tokenize on non-alphanumeric boundaries
       4. Drop stop-words and single-character tokens
+      5. Strip feature-bullet suffix (│-delimited) before tokenizing — Castillo
+         appends "│ 70% Ahorro │ AI ThinQ │ …" which inflates the token set.
+      6. Glue adjacent alpha+digit pairs as model-code aliases so "Stage 301"
+         and "STAGE301" share the token "stage301" and match each other.
     """
+    # Strip everything from the first │ (U+2502) — it's always a feature-bullet
+    # separator added by some stores, never part of a model name.
+    if '\u2502' in name:
+        name = name[:name.index('\u2502')]
     s = _norm(name)
     for pattern, repl in _UNIT_SUBS:
         s = pattern.sub(repl, s)
     tokens = re.findall(r'[a-z0-9]+', s)
-    return frozenset(t for t in tokens if t not in _STOP_WORDS and len(t) > 1)
+    meaningful = [t for t in tokens if t not in _STOP_WORDS and len(t) > 1]
+    glued: set[str] = set(meaningful)
+    for i in range(len(meaningful) - 1):
+        a, b = meaningful[i], meaningful[i + 1]
+        if (a.isalpha() and b.isdigit()) or (a.isdigit() and b.isalpha()):
+            glued.add(a + b)
+    return frozenset(glued)
+
+
+_MAX_PRICE_RATIO = 2.0  # reject cross-store matches where price differs by more than 2×
+
+
+def _group_median_price(products: dict[str, ProductResult]) -> float | None:
+    """Median price of products with known prices; None if no prices are known."""
+    prices = sorted(p.price for p in products.values() if p.price is not None)
+    if not prices:
+        return None
+    mid = len(prices) // 2
+    return (prices[mid - 1] + prices[mid]) / 2 if len(prices) % 2 == 0 else prices[mid]
 
 
 def _detect_brand(keys: frozenset[str]) -> str | None:
@@ -137,27 +167,38 @@ def _detect_brand(keys: frozenset[str]) -> str | None:
     return next((k for k in keys if k in _BRANDS), None)
 
 
-def _has_model_code(tokens: frozenset[str]) -> bool:
-    """True if any token is a model code (letters + digits, ≥4 chars, not a unit spec)."""
-    return any(
-        len(t) >= 4
-        and any(c.isalpha() for c in t)
-        and any(c.isdigit() for c in t)
-        and not _UNIT_SPEC_RE.match(t)
-        for t in tokens
+def _is_model_code(token: str) -> bool:
+    """True if token is a model code (letters + digits, ≥4 chars, not a unit spec)."""
+    return (
+        len(token) >= 4
+        and any(c.isalpha() for c in token)
+        and any(c.isdigit() for c in token)
+        and not _UNIT_SPEC_RE.match(token)
     )
+
+
+def _has_model_code(tokens: frozenset[str]) -> bool:
+    """True if any token is a model code."""
+    return any(_is_model_code(t) for t in tokens)
+
+
+def _has_strong_model_code(tokens: frozenset[str]) -> bool:
+    """True if any token is a strong model code (≥5 chars, letters + digits).
+
+    Strong codes like "gs66sxsc", "55pud7310", "stage301" are unambiguous
+    product identifiers — sharing one is near-certain proof of a match.
+    Weak codes (4 chars, e.g. "2k25") are too short to be conclusive alone.
+    """
+    return any(_is_model_code(t) and len(t) >= 5 for t in tokens)
 
 
 def _keys_match(a: frozenset[str], b: frozenset[str]) -> bool:
     """
     Two key sets match if:
       - The shorter is a subset of the longer (strict identity), OR
-      - They share a model code (alphanumeric identifier like "gs66sxsc") and
-        ≥50% of the shorter set appears in the longer, OR
+      - They share a strong model code (≥5 chars, e.g. "stage301") → instant match, OR
+      - They share a weak model code (4 chars) and ≥50% overlap, OR
       - ≥80% of the shorter set appears in the longer (general fallback)
-
-    The adaptive threshold handles short product names where stores use
-    completely different descriptive words but agree on brand + model code.
     """
     if not a or not b:
         return False
@@ -165,6 +206,8 @@ def _keys_match(a: frozenset[str], b: frozenset[str]) -> bool:
     if shorter <= longer:
         return True
     overlap = shorter & longer
+    if _has_strong_model_code(overlap):
+        return True
     ratio = len(overlap) / len(shorter)
     if _has_model_code(overlap):
         return ratio >= 0.50
@@ -252,6 +295,15 @@ def group_results(all_results: dict[str, StoreSearchResult]) -> list[ProductGrou
                 continue
             if not any(_keys_match(gk, keys_j) for gk in group_keysets.values()):
                 continue
+            # Price outlier guard: skip if price is >2× or <0.5× the group median.
+            # Catches cases where a same-named product line has very different models
+            # (e.g. Gran Lattissima $800k vs $1.7M — different machines, same brand line).
+            if prod_j.price is not None:
+                median = _group_median_price(group_stores)
+                if median is not None:
+                    ratio = prod_j.price / median
+                    if ratio > _MAX_PRICE_RATIO or ratio < 1.0 / _MAX_PRICE_RATIO:
+                        continue
             if store_j not in group_stores:
                 group_stores[store_j] = prod_j
                 group_keysets[store_j] = keys_j
