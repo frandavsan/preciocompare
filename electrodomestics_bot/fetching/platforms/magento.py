@@ -80,6 +80,7 @@ class MagentoAdapter(StoreAdapter):
                     url_to_installments.get(item["url"])
                     or item.get("installments", [])
                 ) if detail else item.get("installments", []),
+                image_url=item.get("image_src"),
             )
             for item in items
         ]
@@ -144,12 +145,14 @@ class MagentoAdapter(StoreAdapter):
             except Exception:
                 pass
 
+        img = li.find("img", class_="product-image-photo")
         if not name:
-            img = li.find("img", class_="product-image-photo")
             name = img.get("alt") if img else None
 
         if not name:
             return None
+
+        image_src = img.get("src") if img else None
 
         price = None
         price_tag = li.find(attrs={"data-price-type": "finalPrice"})
@@ -160,7 +163,7 @@ class MagentoAdapter(StoreAdapter):
                 pass
 
         installments = self._parse_search_installments(li)
-        return {"name": name, "sku": sku, "price": price, "url": url, "installments": installments}
+        return {"name": name, "sku": sku, "price": price, "url": url, "installments": installments, "image_src": image_src}
 
     def _parse_search_installments(self, li) -> list[Installment]:
         """Extracts interest-free installments from a search result <li> element.

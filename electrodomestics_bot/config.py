@@ -27,7 +27,7 @@ class Settings(BaseSettings):
 
     # -- CORS --
     # Comma-separated origins in the env var, e.g. "https://app.example.com,https://staging.example.com"
-    cors_origins: list[str] = ["*"]
+    cors_origins: list[str] = []
 
     # -- Logging --
     log_level: str = "INFO"

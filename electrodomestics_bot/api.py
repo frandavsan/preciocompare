@@ -3,6 +3,7 @@ import logging
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -10,6 +11,7 @@ from slowapi.util import get_remote_address
 from .auth import require_auth
 from .config import settings
 from .fetching.adapters import ADAPTERS
+from .fetching.image_cache import images_dir as _images_dir
 from .models import ProductResponse, SearchResponse, StoreStatusResponse
 from .fetching.service import search_products
 from .monitoring import storage as _storage
@@ -39,6 +41,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/images", StaticFiles(directory=_images_dir), name="images")
 
 
 @app.on_event("startup")

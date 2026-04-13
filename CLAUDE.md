@@ -533,7 +533,13 @@ When running /compact on this project, always preserve:
 These rules apply in every session without waiting for user instruction:
 
 **After writing code:**
-- After writing or significantly modifying any file, invoke the `simplify` skill autonomously to review it for quality and efficiency. Do not skip this step.
+- After writing or significantly modifying any file, run a Codex-powered review autonomously. Do not skip this step.
+- **How to review:** Run three `/codex:adversarial-review` passes in sequence, each with a different focus. Use `--wait` so results come back inline. Pass the diff context via `--scope working-tree` (default) or `--base main` for branch reviews.
+  1. **Code Reuse:** `/codex:adversarial-review --wait look for duplicated logic, existing utilities being reimplemented, and DRY violations. Flag any new function that reimplements something already in the codebase.`
+  2. **Code Quality:** `/codex:adversarial-review --wait look for redundant state, parameter sprawl, copy-paste with slight variation, leaky abstractions, stringly-typed code where constants or enums exist, and unnecessary comments that narrate instead of explaining why.`
+  3. **Efficiency:** `/codex:adversarial-review --wait look for N+1 patterns, unnecessary allocations, blocking calls in async code, missed concurrency where independent operations run sequentially, unbounded data structures, and overly broad operations like reading entire files when only a portion is needed.`
+- After all three reviews complete, aggregate findings and fix each issue directly. If a finding is a false positive, skip it silently.
+- If Codex is unavailable (not installed, rate-limited, or erroring), fall back to the `simplify` skill which uses Claude subagents instead.
 
 
 **When exploring the codebase:**

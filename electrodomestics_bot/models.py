@@ -36,6 +36,7 @@ class ProductResult:
     free_shipping: bool = False
     international: Optional[bool] = False
     available: bool = True
+    image_url: Optional[str] = None  # API-relative path e.g. /images/cetrogar_SKU.jpg; None for non-Magento stores
 
     def to_dict(self) -> dict:
         return {
@@ -48,6 +49,7 @@ class ProductResult:
             "free_shipping": self.free_shipping,
             "international": self.international,
             "available": self.available,
+            "image_url": self.image_url,
         }
 
 
@@ -86,6 +88,12 @@ class ProductResponse(BaseModel):
         "False = domestic, null = concept not applicable to this store"
     )
     available: bool = Field(description="Whether the product is currently in stock")
+    image_url: Optional[str] = Field(
+        None,
+        description="API-relative path to the product image (e.g. /images/cetrogar_SKU.jpg). "
+        "Null for stores where images are not available (non-Magento). "
+        "Prepend the API base URL to get the full image URL."
+    )
 
     @classmethod
     def from_dataclass(cls, p: "ProductResult") -> "ProductResponse":
@@ -102,6 +110,7 @@ class ProductResponse(BaseModel):
             free_shipping=p.free_shipping,
             international=p.international,
             available=p.available,
+            image_url=p.image_url,
         )
 
 

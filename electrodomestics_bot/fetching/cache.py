@@ -37,7 +37,7 @@ from ..models import Installment, ProductResult
 
 DB_PATH = os.path.join(settings.data_dir, "cache.db")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # ---------------------------------------------------------------------------
 # Migrations
@@ -109,6 +109,9 @@ MIGRATIONS: dict[int, list[str]] = {
         """,
         "CREATE INDEX idx_qp_query   ON query_products(query_id)",
         "CREATE INDEX idx_qp_product ON query_products(product_id)",
+    ],
+    3: [
+        "ALTER TABLE products ADD COLUMN image_url TEXT",
     ],
 }
 
@@ -248,8 +251,8 @@ def upsert_products(conn: sqlite3.Connection, store: str, results: list[ProductR
                 """
                 INSERT INTO products
                     (store, sku, name, price, currency, available, free_shipping,
-                     international, url, fetched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     international, url, image_url, fetched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(store, url) DO UPDATE SET
                     sku           = excluded.sku,
                     name          = excluded.name,
@@ -258,12 +261,13 @@ def upsert_products(conn: sqlite3.Connection, store: str, results: list[ProductR
                     available     = excluded.available,
                     free_shipping = excluded.free_shipping,
                     international = excluded.international,
+                    image_url     = excluded.image_url,
                     fetched_at    = excluded.fetched_at
                 """,
                 (
                     store, r.sku, r.name, r.price, r.currency,
                     int(r.available), int(r.free_shipping), 1 if r.international is True else 0,
-                    r.url, now,
+                    r.url, r.image_url, now,
                 ),
             )
             pid = conn.execute(
@@ -304,13 +308,13 @@ def insert_new_products(
                 """
                 INSERT INTO products
                     (store, sku, name, price, currency, available, free_shipping,
-                     international, url, fetched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     international, url, image_url, fetched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     store, r.sku, r.name, r.price, r.currency,
                     int(r.available), int(r.free_shipping), 1 if r.international is True else 0,
-                    r.url, now,
+                    r.url, r.image_url, now,
                 ),
             )
             pid = conn.execute(
@@ -355,6 +359,7 @@ def _row_to_product(conn: sqlite3.Connection, row: sqlite3.Row) -> ProductResult
         free_shipping=bool(row["free_shipping"]),
         international=bool(row["international"]),
         url=row["url"],
+        image_url=row["image_url"],
         installments=_load_installments(conn, row["id"]),
     )
 
