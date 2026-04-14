@@ -9,28 +9,30 @@ from urllib.parse import quote
 
 from bs4 import BeautifulSoup
 
-from ..core import http_get, matches_query
+from ..core import get_client, http_get, matches_query
 from ...models import Installment, ProductResult
 from ..adapters.base import StoreAdapter
 
 # Ordered keyword → card name map for Summa Solutions logo filename parsing.
 # naranja_x must appear before naranja to avoid false matches.
 DEFAULT_CARD_KEYWORDS: list[tuple[str, str]] = [
-    ("naranja_x",   "NaranjaX"),
-    ("naranjax",    "NaranjaX"),
-    ("naranja",     "Naranja"),
-    ("visa",        "Visa"),
-    ("master",      "Mastercard"),
-    ("cabal",       "Cabal"),
-    ("american",    "American Express"),
-    ("amex",        "American Express"),
-    ("bna",         "BNA"),
-    ("santander",   "Santander"),
-    ("macro",       "Macro"),
-    ("bbva",        "BBVA"),
-    ("galicia",     "Galicia"),
-    ("sol",         "Sol"),
-    ("tuya",        "Tuya"),
+    ("naranja_x",       "NaranjaX"),
+    ("naranjax",        "NaranjaX"),
+    ("naranja",         "Naranja"),
+    ("resto_de_bancos", "Visa"),
+    ("visa",            "Visa"),
+    ("master",          "Mastercard"),
+    ("cabal",           "Cabal"),
+    ("american",        "American Express"),
+    ("amex",            "American Express"),
+    ("hipotecario",     "Hipotecario"),
+    ("bna",             "BNA"),
+    ("santander",       "Santander"),
+    ("macro",           "Macro"),
+    ("bbva",            "BBVA"),
+    ("galicia",         "Galicia"),
+    ("sol",             "Sol"),
+    ("tuya",            "Tuya"),
 ]
 
 
@@ -102,10 +104,23 @@ class MagentoAdapter(StoreAdapter):
         return items
 
     async def _fetch_search_page(self, quoted_query: str, page: int) -> tuple[list[dict], int]:
-        """Fetches one page of search results. Returns (items, max_page)."""
+        """Fetches one page of search results. Returns (items, max_page).
+
+        Handles Magento single-result redirects: when a search query matches
+        exactly one product, Magento 302-redirects to the product page instead
+        of showing search results. We detect this and parse the product page.
+        """
         url = self.search_result_url.format(quoted_query, page)
         try:
-            resp = await http_get(url)
+            resp = await get_client().get(url)
+            # Magento redirects to product page when search has exactly one match
+            if resp.is_redirect:
+                redirect_url = str(resp.headers.get("location", ""))
+                if redirect_url and redirect_url.endswith(".html"):
+                    item = await self._parse_product_page(redirect_url)
+                    return ([item], 1) if item else ([], 1)
+                return [], 1
+            resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "lxml")
         except Exception:
             return [], 1
@@ -164,6 +179,52 @@ class MagentoAdapter(StoreAdapter):
 
         installments = self._parse_search_installments(li)
         return {"name": name, "sku": sku, "price": price, "url": url, "installments": installments, "image_src": image_src}
+
+    async def _parse_product_page(self, product_url: str) -> Optional[dict]:
+        """Parse a single product from its Magento product page (redirect fallback).
+
+        When Magento search redirects to a product page (single-result match),
+        we extract the same fields as _parse_search_item from the PDP HTML.
+        """
+        try:
+            resp = await http_get(product_url)
+            soup = BeautifulSoup(resp.text, "lxml")
+        except Exception:
+            return None
+
+        # Name and SKU from ajaxWishlist (same pattern as search items)
+        name = sku = None
+        for tag in soup.find_all(attrs={"data-mage-init": True}):
+            try:
+                d = json.loads(tag["data-mage-init"])
+                if "ajaxWishlist" in d:
+                    name = d["ajaxWishlist"].get("name")
+                    sku = d["ajaxWishlist"].get("sku")
+                    break
+            except Exception:
+                pass
+
+        # Fallback: product title from <span class="base">
+        if not name:
+            title_tag = soup.find("span", class_="base")
+            name = title_tag.get_text(strip=True) if title_tag else None
+
+        if not name:
+            return None
+
+        price = None
+        price_tag = soup.find(attrs={"data-price-type": "finalPrice"})
+        if price_tag and price_tag.get("data-price-amount"):
+            try:
+                price = float(price_tag["data-price-amount"])
+            except ValueError:
+                pass
+
+        img = soup.find("img", class_="gallery-placeholder__image")
+        image_src = img.get("src") if img else None
+
+        installments = self._parse_search_installments(soup)
+        return {"name": name, "sku": sku, "price": price, "url": product_url, "installments": installments, "image_src": image_src}
 
     def _parse_search_installments(self, li) -> list[Installment]:
         """Extracts interest-free installments from a search result <li> element.

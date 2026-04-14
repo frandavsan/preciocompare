@@ -14,6 +14,10 @@ import time
 from datetime import date
 from pathlib import Path
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+TEMPLATE_PATH = _PROJECT_ROOT / "Precios E-commerce El Gato (1).xlsx"
+EXCELS_DIR = _PROJECT_ROOT / "excels"
+
 from .adapters import PRICING_STORES
 from .excel_io import read_template, write_results
 from .models import PricingResult
@@ -22,13 +26,12 @@ from .service import fetch_plans_for_product, search_pricing_stores
 
 def run_pricing() -> None:
     """Interactive CLI workflow for pricing spreadsheet automation."""
-    # 1. Template path
-    template_path = input("Excel template path: ").strip().strip('"')
-    if not template_path or not Path(template_path).exists():
+    template_path = str(TEMPLATE_PATH)
+    if not TEMPLATE_PATH.exists():
         print(f"  Template not found: {template_path}")
         sys.exit(1)
 
-    # 2. Parse template
+    # Parse template
     template_rows = read_template(template_path)
     print(f"  Parsed {len(template_rows)} data rows from template\n")
 
@@ -93,9 +96,18 @@ async def _run_pipeline(
     print(f"  Plans fetched in {elapsed:.1f}s\n")
 
     # --- Write Excel ---
-    stem = Path(template_path).stem
-    output_path = Path(template_path).parent / f"{stem}_{date.today().isoformat()}.xlsx"
-    cells = write_results(template_path, output_path, template_rows, pricing_results)
+    EXCELS_DIR.mkdir(exist_ok=True)
+    base_name = f"pricing_{date.today().isoformat()}"
+    output_path = EXCELS_DIR / f"{base_name}.xlsx"
+    # Auto-increment suffix if file is locked (e.g. open in Excel)
+    suffix = 1
+    while True:
+        try:
+            cells = write_results(template_path, output_path, template_rows, pricing_results)
+            break
+        except PermissionError:
+            suffix += 1
+            output_path = EXCELS_DIR / f"{base_name}_{suffix}.xlsx"
 
     # --- Summary ---
     total_plans = sum(len(r.plans) for r in pricing_results.values())
