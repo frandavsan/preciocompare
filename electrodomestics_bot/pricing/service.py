@@ -16,6 +16,7 @@ from ..fetching.core import http_get, search_all_stores
 from ..fetching.adapters import ADAPTERS
 from ..models import ProductResult
 from .adapters import PRICING_STORES, PricingStore
+from .card_mapping import normalize_card_name
 from .models import PaymentPlan, PricingResult
 from .platforms.vtex import extract_all_plans as vtex_extract_all_plans
 from .platforms.magento import fetch_all_plans as magento_fetch_all_plans
@@ -128,12 +129,56 @@ async def _fetch_vtex_plans(
     products = data.get("products", [])
 
     extra_issuers = _STORE_EXTRA_ISSUERS.get(store.name)
+    mp_sin_tiers = _STORE_MP_SIN_TIERS.get(store.name)
     for raw_product in products:
         if raw_product.get("link") == product_link:
-            return vtex_extract_all_plans(raw_product, product.price, extra_issuers)
+            plans = vtex_extract_all_plans(raw_product, product.price, extra_issuers)
+            if mp_sin_tiers:
+                plans = _fill_mp_sin_tiers(plans, product.price, mp_sin_tiers)
+            return plans
 
     return []
 
+
+def _fill_mp_sin_tiers(
+    plans: list[PaymentPlan],
+    price: float,
+    tiers: list[int],
+) -> list[PaymentPlan]:
+    """
+    Synthesize MercadoPago sin-interés plans for installment counts missing from
+    the API response.
+
+    VTEX stores often omit multi-installment MP plans from commertialOffer even
+    though the website shows them. We synthesize them as 0% interest plans
+    (amount = price / count) for any count in tiers not already present.
+    """
+    existing = {
+        p.installment_count
+        for p in plans
+        if normalize_card_name(p.card_system) == "mercadopago" and not p.has_interest
+    }
+    synthetic = [
+        PaymentPlan(
+            card_system="Mercado Pago",
+            card_issuer=None,
+            installment_count=count,
+            has_interest=False,
+            interest_rate=0.0,
+            amount_per_installment=round(price / count, 2),
+        )
+        for count in tiers
+        if count not in existing
+    ]
+    return plans + synthetic
+
+
+# MercadoPago sin-interés tiers to synthesize when the VTEX API omits them.
+# VTEX commertialOffer often doesn't include multi-installment MP plans even
+# though the store's checkout shows them. List the counts to fill in per store.
+_STORE_MP_SIN_TIERS: dict[str, list[int]] = {
+    "oncity": [3, 6, 9, 12],
+}
 
 # Store-wide bank eligibility sets for VTEX stores that don't use productClusters
 # to signal per-product bank eligibility. Derived from each store's own routing
