@@ -109,7 +109,7 @@ def extract_all_plans(
     for item in product.get("items", []):
         seller = _get_real_seller(item)
         offer = seller.get("commertialOffer", {})
-        if offer.get("AvailableQuantity", 0) <= 0:
+        if offer.get("Price", 0) <= 0:
             continue
         for inst in offer.get("Installments", []):
                 group = inst.get("PaymentSystemGroupName", "")
