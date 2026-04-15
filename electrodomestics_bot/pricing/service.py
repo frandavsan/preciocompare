@@ -127,8 +127,21 @@ async def _fetch_vtex_plans(
     product_link = product.url.removeprefix(store.base_url)
     products = data.get("products", [])
 
+    extra_issuers = _STORE_EXTRA_ISSUERS.get(store.name)
     for raw_product in products:
         if raw_product.get("link") == product_link:
-            return vtex_extract_all_plans(raw_product, product.price)
+            return vtex_extract_all_plans(raw_product, product.price, extra_issuers)
 
     return []
+
+
+# Store-wide bank eligibility sets for VTEX stores that don't use productClusters
+# to signal per-product bank eligibility. Derived from each store's own routing
+# JSON (e.g. Castillo's /files/especific-cuotes-plp.json).
+_STORE_EXTRA_ISSUERS: dict[str, set[str]] = {
+    "castillo": {
+        "macro", "nacion", "galicia", "santander", "bbva", "hipotecario",
+        "credicoop", "cordoba", "ciudad", "supervielle", "patagonia",
+        "icbc", "itau", "hsbc", "comafi",
+    },
+}

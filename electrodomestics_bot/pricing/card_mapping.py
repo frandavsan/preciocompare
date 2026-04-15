@@ -28,6 +28,8 @@ _CARD_ALIASES: dict[str, str] = {
     "naranja": "naranjax",
     "mercado pago": "mercadopago",
     "mercadopago": "mercadopago",
+    "mercadopagopro": "mercadopago",
+    "mercado pago pro": "mercadopago",
     "cabal": "cabal",
     "getnet": "getnet",
     "credimas": "credimas",
