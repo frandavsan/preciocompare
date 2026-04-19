@@ -28,7 +28,7 @@ PRICING_STORES: list[PricingStore] = [
     PricingStore(
         name="cetrogar",
         column="E",
-        platform="magento",
+        platform="vtex",
         base_url="https://www.cetrogar.com.ar",
     ),
     PricingStore(
