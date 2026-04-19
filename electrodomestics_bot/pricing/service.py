@@ -189,4 +189,5 @@ _STORE_EXTRA_ISSUERS: dict[str, set[str]] = {
         "credicoop", "cordoba", "ciudad", "supervielle", "patagonia",
         "icbc", "itau", "hsbc", "comafi",
     },
+    "cetrogar": {"nacion", "hipotecario"},
 }
