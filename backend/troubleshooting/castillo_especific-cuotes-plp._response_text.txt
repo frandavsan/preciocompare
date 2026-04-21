@@ -1,0 +1,570 @@
+{
+  "displayMode": 2,
+   "ocultarComponente":false,
+  "textoSinCuotas":"sin interés",
+   "textoConCuotas":"cuotas fijas",
+   "companies": [
+    {
+      "name": "Visa",
+      "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/1dbbabac-1524-4f6f-ab41-87cc68409c43___f016f98d3fe4496926ef029e2a44cde5.svg",
+      "code": 2,
+      "active": false,
+      "banks": [
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/59c947bf-ef12-48b8-86b2-c657ee2bc832___71c95754d3394dc56e70ea7ea6e65519.svg",
+          "name": "Macro",
+          "bin": "46977100"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/d1cbcadc-de2b-47b1-93ff-1c02b90317b8___21cf4819425295e1da63e9f64e3f6f66.svg",
+          "name": "Galicia",
+          "bin": "45935400"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/db8aed86-ad9e-4ba2-b0b4-219549c64c20___9af1e93f2415d3ea7250b355e5e7eba1.svg",
+          "name": "Columbia",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/5ec183b0-1e09-473a-b195-4cc336aee535___6fdb2ec5a0579d69455657368db6fb82.svg",
+          "name": "Nación",
+          "bin": "479376"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/4df59bfb-cd46-49bf-a118-5f95c78f069a___c5696c4202add49ea4b890dfdf36fe0f.svg",
+          "name": "Hipotecario",
+          "bin": "430497"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/26c9075f-e3f4-477e-a372-4676e87058ee___4f8a1a3ef12bcdc9b5931a0bd18e7203.svg",
+          "name": "Francés",
+          "bin": "454075"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/23a7a263-b1e7-4cbe-9b0a-2a9340e26a2f___b2d87d0cbba5b42038d97827d7d3d2dc.svg",
+          "name": "Santander",
+          "bin": "478013"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/3314cc5b-3b90-4e39-a5e0-6eeb9b7112b7___1cd69106a352c3205d744cacc5200e8a.svg",
+          "name": "Patagonia",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/b188b07c-f4ac-43d5-9b85-ef74264730bc___cdbbb8fdb448d233c13b0d5f32b415b0.svg",
+          "name": "HSBC",
+          "bin": "492137"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/0ac59ad5-d46a-4854-b3d8-d295e6e2bb02___9b3b6ac3c84a1e59321ab0fcd3ff2de9.svg",
+          "name": "Citibank",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/8e2d3abe-6070-42b8-9902-afcdf103da47___89e8a15edef09cf551638c193666d362.svg",
+          "name": "ICBC",
+          "bin": "454659"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/980d2cfb-129b-460d-8170-639895e1089d___99f22b9b9301e5266ddea5d7fdf517dc.svg",
+          "name": "Itau",
+          "bin": "411197"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/e2a02320-84ca-41c3-8d64-efd0d0aa7f95___38b4fcf212c776922ef668518531dfa3.svg",
+          "name": "BCO SANTA CRUZ",
+          "bin": "456514"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/40b74333-ca45-4bd2-8a7b-3c0a1ffd7cf3___25d19c6e160672fae93ee59d903bbfd5.svg",
+          "name": "Credicoop",
+          "bin": "493719"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/cf709cbc-a489-4bd6-855b-2b695c6f29c8___8a8bf68709e6f0deb3c774231a96b1de.svg",
+          "name": "Chubut",
+          "bin": "416427"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/e58def99-2342-4e91-8eab-abc9f6fe12ab___ba0f85e691601bcd0ef2f07d1045b419.svg",
+          "name": "Ciudad",
+          "bin": "468531"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/db8aed86-ad9e-4ba2-b0b4-219549c64c20___9af1e93f2415d3ea7250b355e5e7eba1.svg",
+          "name": "Columbia Internacional",
+          "bin": "405643"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/db8aed86-ad9e-4ba2-b0b4-219549c64c20___9af1e93f2415d3ea7250b355e5e7eba1.svg",
+          "name": "Columbia Gold",
+          "bin": "405645"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/8a855933-b60b-4911-a817-f2f1becd890b___dcc934188b18ee1cb0117c071fc75f18.svg",
+          "name": "COMAFI",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/7b485da0-f9cf-4d74-853f-aa3ffb702a6d___599c66d5a529ef0d1b89c404111554be.svg",
+          "name": "Córdoba",
+          "bin": "473222"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/e7d1707a-3436-4eb4-8ad4-fec76d1f7067___58c17789ab625edb380848402fa616e2.svg",
+          "name": "Corrientes",
+          "bin": "492180"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/b7821a58-70fa-4fc2-a354-f4bd6f630a6c___7b8f6ed6b7899d324def5b8ff442c32d.svg",
+          "name": "Entre Rios",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/9d4435eb-8b03-4f72-b155-67ed84d53af8___cc5e5fd1fa019f9704d4d86882a1a25c.svg",
+          "name": "Industrial",
+          "bin": "453770"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/21ab3f4a-e5ab-4aa7-8976-0acfe98af150___929bbbac0d212eb7c6f2a3403a057d72.svg",
+          "name": "La Pampa",
+          "bin": "462082"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/9c7a2c58-e4f1-4ca5-b89e-c77ea45f0b41___c7ec509d151c7d0c3cd505605341435e.svg",
+          "name": "Naranja",
+          "bin": "402918"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/9e4503b8-243f-4e23-b2fa-1bcf80a7924c___dd769a6698ded33bfd4ebbf02363c633.svg",
+          "name": "Neuquen",
+          "bin": "450750"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/51a7feb1-e1d6-4978-9158-65380d879cbf___8a421939630af67cda22bf38aee7f333.svg",
+          "name": "Nuevo de Santa Fe S.A. c",
+          "bin": "486611"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/ae7ca509-8960-4eef-a2fa-17be84f13804___14844febc8008483f0d6055812296008.svg",
+          "name": "Prov. de Santa Fe",
+          "bin": "486611"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/1bcf1514-4c24-4cc0-9be9-148aed6a8043___35e95428a9d5e9d060e321e16533b7b2.svg",
+          "name": "Provincia BA",
+          "bin": "454846"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/8bce8297-57f6-44d6-bd2a-ba18ec2d08bf___f78a4f8712ce8cf9b47c246d9ba21580.svg",
+          "name": "San Juan",
+          "bin": "498484"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/275b05d4-df12-4a93-8321-ce73a1e8b73a___07e989b4ed97151a0075e744cdcb171f.svg",
+          "name": "Santiago del Estero",
+          "bin": "454071"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/c426f021-1859-4111-b1f7-840f9381e5c2___ba1f36beefe32726d9faa081a0095f0c.svg",
+          "name": "Supervielle",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/4299aff5-fd87-4635-bcae-ec6c3d573e82___84857752240540cceb54aba4052988f9.svg",
+          "name": "Tierra del Fuego",
+          "bin": "486549"
+        },
+        {
+          "active": false,
+          "icon": "",
+          "name": "Nuevo del Chaco S.A. cuo",
+          "bin": "486672"
+        },
+        {
+          "active": false,
+          "icon": "",
+          "name": "Formosa",
+          "bin": "499838"
+        },
+        {
+          "active": false,
+          "icon": "",
+          "name": "Bica",
+          "bin": "494394"
+        }
+      ]
+    },
+    {
+      "name": "Mastercard",
+      "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/86b5dd9f-d485-417b-9d1c-b509cb680728___43f10b61cce27d5145a18cad24b3564a.svg",
+      "code": 4,
+       "active": false,
+      "banks": [
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/59c947bf-ef12-48b8-86b2-c657ee2bc832___71c95754d3394dc56e70ea7ea6e65519.svg",
+          "name": "Macro",
+          "bin": "525455"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/d1cbcadc-de2b-47b1-93ff-1c02b90317b8___21cf4819425295e1da63e9f64e3f6f66.svg",
+          "name": "Galicia",
+          "bin": "523937"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/db8aed86-ad9e-4ba2-b0b4-219549c64c20___9af1e93f2415d3ea7250b355e5e7eba1.svg",
+          "name": "Columbia",
+          "bin": "553494"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/5ec183b0-1e09-473a-b195-4cc336aee535___6fdb2ec5a0579d69455657368db6fb82.svg",
+          "name": "Nación",
+          "bin": "518664"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/4df59bfb-cd46-49bf-a118-5f95c78f069a___c5696c4202add49ea4b890dfdf36fe0f.svg",
+          "name": "Hipotecario",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/26c9075f-e3f4-477e-a372-4676e87058ee___4f8a1a3ef12bcdc9b5931a0bd18e7203.svg",
+          "name": "Francés",
+          "bin": "523920"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/23a7a263-b1e7-4cbe-9b0a-2a9340e26a2f___b2d87d0cbba5b42038d97827d7d3d2dc.svg",
+          "name": "Santander",
+          "bin": "530058"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/3314cc5b-3b90-4e39-a5e0-6eeb9b7112b7___1cd69106a352c3205d744cacc5200e8a.svg",
+          "name": "Patagonia",
+          "bin": "558642"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/6efcba0e-88a8-4fe6-add5-11cb921fd2b8___bffc8e709d924270de43135eeee2c7a9.svg",
+          "name": "HSBC",
+          "bin": "55363800"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/0ac59ad5-d46a-4854-b3d8-d295e6e2bb02___9b3b6ac3c84a1e59321ab0fcd3ff2de9.svg",
+          "name": "Citibank",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/8e2d3abe-6070-42b8-9902-afcdf103da47___89e8a15edef09cf551638c193666d362.svg",
+          "name": "ICBC",
+          "bin": "527609"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/980d2cfb-129b-460d-8170-639895e1089d___99f22b9b9301e5266ddea5d7fdf517dc.svg",
+          "name": "Itau",
+          "bin": "549828"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/e2a02320-84ca-41c3-8d64-efd0d0aa7f95___38b4fcf212c776922ef668518531dfa3.svg",
+          "name": "BCO SANTA CRUZ",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/40b74333-ca45-4bd2-8a7b-3c0a1ffd7cf3___25d19c6e160672fae93ee59d903bbfd5.svg",
+          "name": "Credicoop",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/cf709cbc-a489-4bd6-855b-2b695c6f29c8___8a8bf68709e6f0deb3c774231a96b1de.svg",
+          "name": "Chubut",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/8a855933-b60b-4911-a817-f2f1becd890b___dcc934188b18ee1cb0117c071fc75f18.svg",
+          "name": "COMAFI",
+          "bin": "525860"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/c426f021-1859-4111-b1f7-840f9381e5c2___ba1f36beefe32726d9faa081a0095f0c.svg",
+          "name": "Supervielle",
+          "bin": "553646"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/1bcf1514-4c24-4cc0-9be9-148aed6a8043___35e95428a9d5e9d060e321e16533b7b2.svg",
+          "name": "Provincia BA",
+          "bin": "55749798"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/9d4435eb-8b03-4f72-b155-67ed84d53af8___cc5e5fd1fa019f9704d4d86882a1a25c.svg",
+          "name": "Industrial",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/51a7feb1-e1d6-4978-9158-65380d879cbf___8a421939630af67cda22bf38aee7f333.svg",
+          "name": "Nuevo de Santa Fe S.A",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/db8aed86-ad9e-4ba2-b0b4-219549c64c20___9af1e93f2415d3ea7250b355e5e7eba1.svg",
+          "name": "Columbia Black",
+          "bin": "515825"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/db8aed86-ad9e-4ba2-b0b4-219549c64c20___9af1e93f2415d3ea7250b355e5e7eba1.svg",
+          "name": "Columbia Gold",
+          "bin": "520226"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/db8aed86-ad9e-4ba2-b0b4-219549c64c20___9af1e93f2415d3ea7250b355e5e7eba1.svg",
+          "name": "Columbia Internacional",
+          "bin": "531015"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/db8aed86-ad9e-4ba2-b0b4-219549c64c20___9af1e93f2415d3ea7250b355e5e7eba1.svg",
+          "name": "Columbia Black",
+          "bin": "515825"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/db8aed86-ad9e-4ba2-b0b4-219549c64c20___9af1e93f2415d3ea7250b355e5e7eba1.svg",
+          "name": "Columbia Gold",
+          "bin": "520226"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/db8aed86-ad9e-4ba2-b0b4-219549c64c20___9af1e93f2415d3ea7250b355e5e7eba1.svg",
+          "name": "Columbia Internacional",
+          "bin": "531015"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/7b485da0-f9cf-4d74-853f-aa3ffb702a6d___599c66d5a529ef0d1b89c404111554be.svg",
+          "name": "Córdoba",
+          "bin": "553409"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/b7821a58-70fa-4fc2-a354-f4bd6f630a6c___7b8f6ed6b7899d324def5b8ff442c32d.svg",
+          "name": "Entre Rios",
+          "bin": "558838"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/21ab3f4a-e5ab-4aa7-8976-0acfe98af150___929bbbac0d212eb7c6f2a3403a057d72.svg",
+          "name": "La Pampa",
+          "bin": "559902"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/9e4503b8-243f-4e23-b2fa-1bcf80a7924c___dd769a6698ded33bfd4ebbf02363c633.svg",
+          "name": "Neuquen",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/ae7ca509-8960-4eef-a2fa-17be84f13804___14844febc8008483f0d6055812296008.svg",
+          "name": "Prov. de Santa Fe",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/8bce8297-57f6-44d6-bd2a-ba18ec2d08bf___f78a4f8712ce8cf9b47c246d9ba21580.svg",
+          "name": "San Juan",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/4299aff5-fd87-4635-bcae-ec6c3d573e82___84857752240540cceb54aba4052988f9.svg",
+          "name": "Tierra del Fuego c",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "",
+          "name": "Nuevo del Chaco S.A.",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "",
+          "name": "Rioja",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "",
+          "name": "Bica",
+          "bin": "11111111"
+        }
+      ]
+    },
+    {
+      "name": "Amex",
+      "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/47ee66ff-5b8f-4651-96c9-f70b5b372d00___f5c512e82ef87aa0e7984d28833d9f34.svg",
+      "code": 1,
+      "active": false,
+      "banks": [
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/59c947bf-ef12-48b8-86b2-c657ee2bc832___71c95754d3394dc56e70ea7ea6e65519.svg",
+          "name": "Macro",
+          "bin": "371594"
+        },
+        {
+        "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/d1cbcadc-de2b-47b1-93ff-1c02b90317b8___21cf4819425295e1da63e9f64e3f6f66.svg",
+          "name": "Galicia",
+          "bin": "371595"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/26c9075f-e3f4-477e-a372-4676e87058ee___4f8a1a3ef12bcdc9b5931a0bd18e7203.svg",
+          "name": "Francés",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/b188b07c-f4ac-43d5-9b85-ef74264730bc___cdbbb8fdb448d233c13b0d5f32b415b0.svg",
+          "name": "HSBC",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/5ec183b0-1e09-473a-b195-4cc336aee535___6fdb2ec5a0579d69455657368db6fb82.svg",
+          "name": "Nación",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/47ee66ff-5b8f-4651-96c9-f70b5b372d00___f5c512e82ef87aa0e7984d28833d9f34.svg",
+          "name": "Amex",
+          "bin": "37641816"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/9c7a2c58-e4f1-4ca5-b89e-c77ea45f0b41___c7ec509d151c7d0c3cd505605341435e.svg",
+          "name": "Naranja",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/3314cc5b-3b90-4e39-a5e0-6eeb9b7112b7___1cd69106a352c3205d744cacc5200e8a.svg",
+          "name": "Patagonia",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/8bce8297-57f6-44d6-bd2a-ba18ec2d08bf___f78a4f8712ce8cf9b47c246d9ba21580.svg",
+          "name": "San Juan",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/23a7a263-b1e7-4cbe-9b0a-2a9340e26a2f___b2d87d0cbba5b42038d97827d7d3d2dc.svg",
+          "name": "Santander",
+          "bin": "371595"
+        }
+      ]
+    },
+    {
+      "name": "Naranja",
+      "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/9c7a2c58-e4f1-4ca5-b89e-c77ea45f0b41___c7ec509d151c7d0c3cd505605341435e.svg",
+      "code": 35,
+      "active": true,
+      "banks": [
+        {
+          "active": true,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/9c7a2c58-e4f1-4ca5-b89e-c77ea45f0b41___c7ec509d151c7d0c3cd505605341435e.svg",
+          "name": "Naranja",
+          "bin": "589562"
+        }
+      ]
+    },
+    {
+      "name": "Cabal",
+      "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/d905aaaf-706b-4d4c-9b80-54df869111b6___d257e2243fe316c8cd5616bdbf276abb.svg",
+      "code": 33,
+       "active": false,
+      "banks": [
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/e58def99-2342-4e91-8eab-abc9f6fe12ab___ba0f85e691601bcd0ef2f07d1045b419.svg",
+          "name": "Ciudad",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "https://castillo.vtexassets.com/assets/vtex.file-manager-graphql/images/40b74333-ca45-4bd2-8a7b-3c0a1ffd7cf3___25d19c6e160672fae93ee59d903bbfd5.svg",
+          "name": "Credicoop",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "",
+          "name": "Formosa",
+          "bin": "11111111"
+        },
+        {
+          "active": false,
+          "icon": "",
+          "name": "Nuevo del Chaco S.A.",
+          "bin": "11111111"
+        }
+      ]
+    }
+  ]
+}
