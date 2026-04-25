@@ -42,7 +42,13 @@ class VtexAdapter(StoreAdapter):
     def simulation_url(self) -> str:
         return f"{self.base_url}/api/checkout/pub/orderForms/simulation"
 
-    async def search(self, query: str, detail: bool = False, check_shipping: bool = True) -> list[ProductResult]:
+    async def search(
+        self,
+        query: str,
+        detail: bool = False,
+        check_shipping: bool = True,
+        postal_code: Optional[str] = None,
+    ) -> list[ProductResult]:
         all_products = await self._fetch_all_products(quote(query))
 
         # Pre-filter before shipping simulations — avoids POSTing for products
@@ -52,11 +58,12 @@ class VtexAdapter(StoreAdapter):
             if p.get("productName") and matches_query(p["productName"], query)
         ]
 
+        effective_postal = postal_code or self.postal_code
         effective_override = self._free_shipping_override if check_shipping else False
         available_indices = [i for i, p in enumerate(products) if self._is_available(p)]
         if available_indices and effective_override is None:
             shipping_results = await asyncio.gather(
-                *[self._check_free_shipping(products[i]) for i in available_indices]
+                *[self._check_free_shipping(products[i], effective_postal) for i in available_indices]
             )
             shipping_map = dict(zip(available_indices, shipping_results))
         elif available_indices:
@@ -202,8 +209,9 @@ class VtexAdapter(StoreAdapter):
                     return True
         return False
 
-    async def _check_free_shipping(self, product: dict) -> bool:
-        """Returns True if any home-delivery SLA has price 0 for the configured postal code."""
+    async def _check_free_shipping(self, product: dict, postal_code: Optional[str] = None) -> bool:
+        """Returns True if any home-delivery SLA has price 0 for the given postal code.
+        Falls back to self.postal_code when postal_code is None."""
         try:
             items = product.get("items", [])
             if not items:
@@ -215,7 +223,7 @@ class VtexAdapter(StoreAdapter):
             seller_id = self._get_real_seller(item).get("sellerId", "1")
             payload = {
                 "items": [{"id": sku_id, "quantity": 1, "seller": seller_id}],
-                "postalCode": self.postal_code,
+                "postalCode": postal_code or self.postal_code,
                 "country": "ARG",
             }
             resp = await http_post(

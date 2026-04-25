@@ -12,8 +12,12 @@ import {
 } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { products, stores, formatPrice } from "@/data/mockData";
-import type { Product } from "@/data/mockData";
+import type { Product, StorePrice } from "@/data/mockData";
 import TopNav from "@/components/TopNav";
+
+type SelectedComparisonPrice = StorePrice & {
+  productName: string;
+};
 
 function findProduct(query: string): Product {
   const q = query.toLowerCase();
@@ -49,10 +53,45 @@ function getPromoInstallments(store: string): number {
   return installmentOptions[store] || 6;
 }
 
+function parseSelectedComparisons(value: string | null): SelectedComparisonPrice[] {
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(value) as Array<{ store?: unknown; name?: unknown; price?: unknown }>;
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .filter(
+        (item) =>
+          typeof item.store === "string" &&
+          typeof item.name === "string" &&
+          typeof item.price === "number" &&
+          Number.isFinite(item.price)
+      )
+      .map((item, index) => ({
+        store: item.store as string,
+        productName: item.name as string,
+        price: item.price as number,
+        currency: "ARS",
+        url: "#",
+        inStock: true,
+        freeShipping: index % 2 === 0,
+      }));
+  } catch {
+    return [];
+  }
+}
+
 const ProductIntelligence = () => {
   const [searchParams] = useSearchParams();
   const query = searchParams.get("q") || "";
   const fromCABA = searchParams.get("caba") === "1";
+  const postalCode = searchParams.get("postal_code") ?? "";
+  const selectedComparisonPrices = useMemo(
+    () => parseSelectedComparisons(searchParams.get("selected")),
+    [searchParams]
+  );
+  const isSelectiveComparison = selectedComparisonPrices.length > 0;
   const [priceOrder, setPriceOrder] = useState<"asc" | "desc" | "promo">("asc");
   const [isPaymentAnalysisLoading, setIsPaymentAnalysisLoading] = useState(false);
   const [paymentAnalysisProgress, setPaymentAnalysisProgress] = useState(0);
@@ -75,10 +114,16 @@ const ProductIntelligence = () => {
   }, []);
 
   const product = useMemo(() => findProduct(query), [query]);
+  const comparisonPrices = useMemo(
+    () => (isSelectiveComparison ? selectedComparisonPrices : product.prices),
+    [isSelectiveComparison, product.prices, selectedComparisonPrices]
+  );
+  const displayProductName = isSelectiveComparison ? query || "Productos seleccionados" : product.name;
+  const displayCategory = isSelectiveComparison ? "Seleccion manual" : product.category;
 
   const cheapestFirstPrices = useMemo(
-    () => [...product.prices].sort((a, b) => a.price - b.price),
-    [product]
+    () => [...comparisonPrices].sort((a, b) => a.price - b.price),
+    [comparisonPrices]
   );
 
   const sortedPrices = useMemo(
@@ -98,9 +143,9 @@ const ProductIntelligence = () => {
   const minPrice = cheapestFirstPrices[0]?.price || 0;
   const maxPrice = cheapestFirstPrices[cheapestFirstPrices.length - 1]?.price || 0;
   const avgPrice = Math.round(
-    product.prices.reduce((a, b) => a + b.price, 0) / product.prices.length
+    comparisonPrices.reduce((a, b) => a + b.price, 0) / comparisonPrices.length
   );
-  const storesFound = product.prices.length;
+  const storesFound = comparisonPrices.length;
 
   const cheapVsAvg = (((minPrice - avgPrice) / avgPrice) * 100).toFixed(1);
   const expVsAvg = (((maxPrice - avgPrice) / avgPrice) * 100).toFixed(1);
@@ -217,6 +262,11 @@ const ProductIntelligence = () => {
                 CABA
               </span>
             )}
+            {!fromCABA && postalCode && (
+              <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-primary border border-primary px-2 py-0.5 rounded-sm">
+                CP {postalCode}
+              </span>
+            )}
             <span className="font-mono text-[10px] text-muted-foreground tracking-wider hidden sm:block">
               SYNC: 30 MAR 2026
             </span>
@@ -232,7 +282,7 @@ const ProductIntelligence = () => {
                   <div className="absolute inset-0 rounded-[2.5rem] border border-border/60 bg-gradient-to-br from-card/90 via-card/55 to-primary/5" />
                   <img
                     src={product.imageUrl}
-                    alt={product.name}
+                    alt={displayProductName}
                     className="relative h-full w-full rounded-[2.25rem] object-contain p-6 drop-shadow-[0_18px_24px_hsl(220_20%_14%_/_0.15)]"
                     loading="eager"
                   />
@@ -240,14 +290,14 @@ const ProductIntelligence = () => {
                 <div className="min-w-0 pt-3">
                   <div className="flex items-center gap-3 flex-wrap mb-5">
                     <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground border border-border px-2 py-0.5 rounded-sm bg-card/60">
-                      {product.category}
+                      {displayCategory}
                     </span>
                     <span className="font-mono text-[10px] text-muted-foreground tracking-wide">
                       Consulta: "{query}"
                     </span>
                   </div>
                   <h1 className="text-4xl sm:text-[3.6rem] lg:text-[3.9rem] xl:text-[4.2rem] font-bold text-foreground leading-[0.95] tracking-tight max-w-[14ch] xl:max-w-[15ch] mb-4 text-left">
-                    {product.name}
+                    {displayProductName}
                   </h1>
                   <div className="primary-rule mb-5" />
                   <p className="text-sm lg:text-[15px] text-muted-foreground leading-[1.8] max-w-[42rem] mb-6">
@@ -358,6 +408,9 @@ const ProductIntelligence = () => {
               <TableHeader>
                 <TableRow className="border-border hover:bg-transparent">
                   <TableHead className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-medium">Tienda</TableHead>
+                  {isSelectiveComparison && (
+                    <TableHead className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-medium">Producto seleccionado</TableHead>
+                  )}
                   <TableHead className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-medium">Precio</TableHead>
                   <TableHead className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-medium">vs Promedio</TableHead>
                   <TableHead className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-medium">vs Mas caro</TableHead>
@@ -372,8 +425,13 @@ const ProductIntelligence = () => {
                   const diff = (((sp.price - avgPrice) / avgPrice) * 100).toFixed(1);
                   const diffVsMax = (((sp.price - maxPrice) / maxPrice) * 100).toFixed(1);
                   return (
-                    <TableRow key={sp.store} className={`border-border hover:bg-accent/40 ${sp.price === minPrice ? "bg-accent/30" : ""}`}>
+                    <TableRow key={`${sp.store}-${"productName" in sp ? sp.productName : sp.price}`} className={`border-border hover:bg-accent/40 ${sp.price === minPrice ? "bg-accent/30" : ""}`}>
                       <TableCell className="text-sm font-medium">{sp.store}</TableCell>
+                      {isSelectiveComparison && (
+                        <TableCell className="max-w-[280px] text-sm text-foreground">
+                          <span className="line-clamp-2">{"productName" in sp ? sp.productName : displayProductName}</span>
+                        </TableCell>
+                      )}
                       <TableCell>
                         <span className={`font-mono text-sm font-semibold ${sp.price === minPrice ? "text-secondary" : "text-foreground"}`}>
                           {formatPrice(sp.price)}
@@ -481,49 +539,51 @@ const ProductIntelligence = () => {
                   <h3 className="text-base font-bold text-foreground">Evolucion de precios</h3>
                 </div>
               </div>
-              <div className="px-5 pb-5">
-                <ResponsiveContainer width="100%" height={240}>
-                  <LineChart data={lineData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 12%, 90%)" />
-                    <XAxis
-                      dataKey="date"
-                      tick={{ fill: "hsl(220, 10%, 46%)", fontSize: 10, fontFamily: "'IBM Plex Mono', monospace" }}
-                      axisLine={{ stroke: "hsl(220, 12%, 82%)" }}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tick={{ fill: "hsl(220, 10%, 46%)", fontSize: 10, fontFamily: "'IBM Plex Mono', monospace" }}
-                      axisLine={{ stroke: "hsl(220, 12%, 82%)" }}
-                      tickLine={false}
-                      tickFormatter={(v) => `${(v / 1000000).toFixed(1)}M`}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "hsl(40, 30%, 99%)",
-                        border: "2px solid hsl(220, 12%, 82%)",
-                        borderRadius: "2px",
-                        fontSize: "12px",
-                        fontFamily: "'IBM Plex Mono', monospace",
-                      }}
-                      formatter={(value: number) => [formatPrice(value), ""]}
-                    />
-                    <Legend wrapperStyle={{ fontSize: "11px", fontFamily: "'IBM Plex Mono', monospace" }} />
-                    {storesInHistory.map((storeName) => {
-                      const storeData = stores.find((s) => s.name === storeName);
-                      return (
-                        <Line
-                          key={storeName}
-                          type="monotone"
-                          dataKey={storeName}
-                          stroke={storeData?.color || "hsl(262, 52%, 47%)"}
-                          strokeWidth={1.5}
-                          dot={false}
-                          activeDot={{ r: 3, strokeWidth: 1 }}
-                        />
-                      );
-                    })}
-                  </LineChart>
-                </ResponsiveContainer>
+              <div className="relative px-5 pb-5">
+                <div className="pointer-events-none select-none opacity-35 blur-[1.2px] grayscale">
+                  <ResponsiveContainer width="100%" height={240}>
+                    <LineChart data={lineData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 12%, 90%)" />
+                      <XAxis
+                        dataKey="date"
+                        tick={{ fill: "hsl(220, 10%, 46%)", fontSize: 10, fontFamily: "'IBM Plex Mono', monospace" }}
+                        axisLine={{ stroke: "hsl(220, 12%, 82%)" }}
+                        tickLine={false}
+                      />
+                      <YAxis
+                        tick={{ fill: "hsl(220, 10%, 46%)", fontSize: 10, fontFamily: "'IBM Plex Mono', monospace" }}
+                        axisLine={{ stroke: "hsl(220, 12%, 82%)" }}
+                        tickLine={false}
+                        tickFormatter={(v) => `${(v / 1000000).toFixed(1)}M`}
+                      />
+                      <Legend wrapperStyle={{ fontSize: "11px", fontFamily: "'IBM Plex Mono', monospace" }} />
+                      {storesInHistory.map((storeName) => {
+                        const storeData = stores.find((s) => s.name === storeName);
+                        return (
+                          <Line
+                            key={storeName}
+                            type="monotone"
+                            dataKey={storeName}
+                            stroke={storeData?.color || "hsl(262, 52%, 47%)"}
+                            strokeWidth={1.5}
+                            dot={false}
+                            activeDot={{ r: 3, strokeWidth: 1 }}
+                          />
+                        );
+                      })}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="absolute inset-x-5 bottom-5 top-0 flex items-center justify-center rounded-sm bg-card/55 backdrop-blur-[1px]">
+                  <div className="border border-border/40 bg-card/85 px-5 py-3 text-center shadow-[0_18px_36px_hsl(220_20%_14%_/_0.06)]">
+                    <span className="font-mono text-[11px] uppercase tracking-[0.22em] text-primary">
+                      No disponible
+                    </span>
+                    <span className="mt-1 block font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">
+                      Proximamente
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

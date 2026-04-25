@@ -73,8 +73,15 @@ class FravegaAdapter(StoreAdapter):
     def _endpoint(self) -> str:
         return f"{self.base_url}/api/v1/rest/search"
 
-    async def search(self, query: str, detail: bool = False, check_shipping: bool = True) -> list[ProductResult]:
+    async def search(
+        self,
+        query: str,
+        detail: bool = False,
+        check_shipping: bool = True,
+        postal_code: Optional[str] = None,
+    ) -> list[ProductResult]:
         raw = await self._fetch_all_products(query)
+        effective_postal = postal_code or self.postal_code
         results = []
         shipping_tasks = []  # list of (result_index, sku, seller_id)
         detail_tasks = []    # list of (result_index, sku)
@@ -121,7 +128,7 @@ class FravegaAdapter(StoreAdapter):
                 )
             else:
                 shipping_results = await asyncio.gather(*[
-                    self._fetch_free_shipping(sku, seller_id)
+                    self._fetch_free_shipping(sku, seller_id, effective_postal)
                     for _, sku, seller_id in shipping_tasks
                 ])
                 for (idx, _, _), is_free in zip(shipping_tasks, shipping_results):
@@ -205,10 +212,16 @@ class FravegaAdapter(StoreAdapter):
         )
         return await self._post_gql(gql)
 
-    async def _fetch_free_shipping(self, sku: str, seller_id: str) -> bool:
-        """Returns True if home delivery is free for this SKU+seller at the configured postal code."""
+    async def _fetch_free_shipping(
+        self, sku: str, seller_id: str, postal_code: Optional[str] = None
+    ) -> bool:
+        """Returns True if home delivery is free for this SKU+seller at the given postal code.
+        Falls back to self.postal_code when postal_code is None. The postal code is
+        interpolated into the GQL query below — the caller (api.py /search) validates
+        it against ^[A-Z]?\\d{4}[A-Z]{0,3}$ before it ever reaches this path."""
+        effective_postal = postal_code or self.postal_code
         if _SHIPPING_CACHE_ENABLED:
-            cache_key = (sku, seller_id, self.postal_code)
+            cache_key = (sku, seller_id, effective_postal)
             entry = _shipping_cache.get(cache_key)
             if entry is not None:
                 result, ts = entry
@@ -216,7 +229,7 @@ class FravegaAdapter(StoreAdapter):
                     return result
 
         gql = (
-            f'{{ calculateDeliveryTermAndCost(sku: "{sku}", seller: "{seller_id}", postalCode: "{self.postal_code}") {{'
+            f'{{ calculateDeliveryTermAndCost(sku: "{sku}", seller: "{seller_id}", postalCode: "{effective_postal}") {{'
             "  cost"
             "} }"
         )
@@ -228,7 +241,7 @@ class FravegaAdapter(StoreAdapter):
             result = False
 
         if _SHIPPING_CACHE_ENABLED:
-            _shipping_cache[(sku, seller_id, self.postal_code)] = (result, time.time())
+            _shipping_cache[(sku, seller_id, effective_postal)] = (result, time.time())
 
         return result
 

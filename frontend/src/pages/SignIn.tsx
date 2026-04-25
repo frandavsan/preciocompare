@@ -1,7 +1,52 @@
+import { useState, type FormEvent } from "react";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import TopNav from "@/components/TopNav";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
+
+type LocationState = { from?: { pathname?: string } } | null;
 
 const SignIn = () => {
+  const { session, isLoading } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!isLoading && session) {
+    const from = (location.state as LocationState)?.from?.pathname ?? "/";
+    return <Navigate to={from} replace />;
+  }
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (isSubmitting) return;
+
+    setIsSubmitting(true);
+    setError(null);
+
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+
+    if (signInError) {
+      setError(
+        signInError.message === "Invalid login credentials"
+          ? "Credenciales invalidas"
+          : signInError.message
+      );
+      setIsSubmitting(false);
+      return;
+    }
+
+    const from = (location.state as LocationState)?.from?.pathname ?? "/";
+    navigate(from, { replace: true });
+  };
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#fbf9f5] text-[#1b1c1a]">
       <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden="true">
@@ -18,58 +63,75 @@ const SignIn = () => {
             <h1 className="text-4xl font-semibold tracking-tight text-[#1b1c1a]">
               Acceso al Portal
             </h1>
-            <p className="mt-3 text-sm text-[#4a4452]/70">
-              Intelligence for Enterprise Decision Making
-            </p>
           </header>
 
-          <form className="space-y-6" onSubmit={(e) => e.preventDefault()}>
+          <form className="space-y-6" onSubmit={handleSubmit} noValidate>
             <div className="space-y-2">
-              <label className="ml-1 block font-mono text-[11px] uppercase tracking-[0.22em] text-[#4a4452]">
+              <label htmlFor="signin-email" className="ml-1 block font-mono text-[11px] uppercase tracking-[0.22em] text-[#4a4452]">
                 Email
               </label>
               <input
+                id="signin-email"
                 type="email"
+                autoComplete="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={isSubmitting}
                 placeholder="nombre@compania.com"
-                className="w-full rounded-[0.6rem] border-b-2 border-transparent bg-[#eae8e4] px-4 py-4 text-[#1b1c1a] outline-none transition-all duration-300 placeholder:text-[#7c7484]/70 focus:border-[#46078d] focus:bg-white"
+                className="w-full rounded-[0.6rem] border-b-2 border-transparent bg-[#eae8e4] px-4 py-4 text-[#1b1c1a] outline-none transition-all duration-300 placeholder:text-[#7c7484]/70 focus:border-[#46078d] focus:bg-white disabled:opacity-60"
               />
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center justify-between px-1">
-                <label className="font-mono text-[11px] uppercase tracking-[0.22em] text-[#4a4452]">
-                  Contrasena
-                </label>
-                <button
-                  type="button"
-                  className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#46078d]/60 transition-opacity hover:opacity-100"
-                >
-                  Olvido su clave?
-                </button>
-              </div>
+              <label htmlFor="signin-password" className="ml-1 block font-mono text-[11px] uppercase tracking-[0.22em] text-[#4a4452]">
+                Contrasena
+              </label>
               <input
+                id="signin-password"
                 type="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={isSubmitting}
                 placeholder="••••••••"
-                className="w-full rounded-[0.6rem] border-b-2 border-transparent bg-[#eae8e4] px-4 py-4 text-[#1b1c1a] outline-none transition-all duration-300 placeholder:text-[#7c7484]/70 focus:border-[#46078d] focus:bg-white"
+                className="w-full rounded-[0.6rem] border-b-2 border-transparent bg-[#eae8e4] px-4 py-4 text-[#1b1c1a] outline-none transition-all duration-300 placeholder:text-[#7c7484]/70 focus:border-[#46078d] focus:bg-white disabled:opacity-60"
               />
             </div>
+
+            {error && (
+              <div
+                role="alert"
+                className="rounded-[0.5rem] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+              >
+                {error}
+              </div>
+            )}
 
             <div className="pt-4">
               <button
                 type="submit"
-                className="flex w-full items-center justify-center gap-2 rounded-[0.6rem] bg-[#46078d] py-4 font-mono text-[11px] font-bold tracking-[0.22em] text-white transition-all duration-300 hover:opacity-90 active:scale-[0.99]"
+                disabled={isSubmitting || !email || !password}
+                className="flex w-full items-center justify-center gap-2 rounded-[0.6rem] bg-[#46078d] py-4 font-mono text-[11px] font-bold tracking-[0.22em] text-white transition-all duration-300 hover:opacity-90 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                INGRESAR
-                <ArrowRight className="h-4 w-4" />
+                {isSubmitting ? "INGRESANDO..." : "INGRESAR"}
+                {!isSubmitting && <ArrowRight className="h-4 w-4" />}
               </button>
             </div>
           </form>
 
-          <div className="mt-10 flex flex-col items-center pt-8">
-            <p className="mb-4 text-xs text-[#4a4452]/55">No tiene una cuenta corporativa?</p>
-            <button className="font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-[#016a68] transition-colors hover:text-[#46078d]">
-              SOLICITAR DEMOSTRACION
-            </button>
+          <div className="mt-10 border-t border-[#4a4452]/10 pt-7 text-center">
+            <p className="text-sm leading-relaxed text-[#4a4452]/70">
+              No tiene cuenta? Contactese con{" "}
+              <a
+                href="mailto:frandav1303@gmail.com"
+                className="font-semibold text-[#3f1476] transition-colors hover:text-[#016a68]"
+              >
+                frandav1303@gmail.com
+              </a>{" "}
+              para consultar precios
+            </p>
           </div>
         </div>
 

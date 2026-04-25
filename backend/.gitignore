@@ -2,6 +2,10 @@ __pycache__/
 *.pyc
 *.pyo
 data/cache.db
+data/monitoring.db
 node-compile-cache/
 webanalyze_results.json
 .claude/settings.local.json
+.env
+.env.local
+.env.*.local

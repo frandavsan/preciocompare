@@ -96,7 +96,14 @@ class MegatoneAdapter(StoreAdapter):
     def _origin_headers(self) -> dict:
         return {"Origin": self.base_url, "Referer": self.base_url + "/"}
 
-    async def search(self, query: str, detail: bool = False, check_shipping: bool = True) -> list[ProductResult]:
+    async def search(
+        self,
+        query: str,
+        detail: bool = False,
+        check_shipping: bool = True,
+        postal_code: Optional[str] = None,
+    ) -> list[ProductResult]:
+        # postal_code unused — Megatone reads free_shipping directly from Doofinder.
         raw = await self._fetch_all_products(query)
         matching = [p for p in raw if matches_query(p.get("title", ""), query)]
 

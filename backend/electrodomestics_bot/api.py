@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -89,11 +90,25 @@ async def search(
     request: Request,
     q: str = Query(description="Product model name or SKU (e.g. 'Samsung S26', 'PS5', '55PUD7310')"),
     detail: bool = Query(False, description="When true, fetches full card/bank names for installments (slower)"),
+    # Argentine postal codes are either a 4-digit legacy code ("1425") or an 8-char CPA
+    # ("A1425AAB": 1 letter + 4 digits + 3 letters). FastAPI rejects non-matching input
+    # with 422, which is critical: self.postal_code is interpolated into a GraphQL query
+    # string in platforms/fravega.py (_fetch_free_shipping). The regex gate is the only
+    # thing keeping that path safe from injection.
+    postal_code: Optional[str] = Query(
+        None,
+        pattern=r"^[A-Z]?\d{4}[A-Z]{0,3}$",
+        description=(
+            "Optional postal code for shipping simulation. When omitted, each adapter "
+            "uses its default (CABA '1425' for VTEX/Fravega). Non-CABA codes bypass "
+            "the cache. Format: 4 digits (e.g. '1425') or 8-char CPA (e.g. 'A1425AAB')."
+        ),
+    ),
     user: dict = Depends(require_auth),
 ):
     """Search all stores for a product model or SKU."""
     try:
-        raw = await search_products(q, detail)
+        raw = await search_products(q, detail, postal_code=postal_code)
         results = {}
         store_status = {}
         for store, ssr in raw.items():

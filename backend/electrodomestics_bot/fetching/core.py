@@ -81,6 +81,7 @@ async def search_all_stores(
     adapters: list,
     detail: bool = False,
     check_shipping: bool = True,
+    postal_code: Optional[str] = None,
     on_run: Optional[Callable] = None,
 ) -> dict[str, StoreSearchResult]:
     """
@@ -103,7 +104,7 @@ async def search_all_stores(
         status = "ok"
         error_detail: Optional[str] = None
         try:
-            raw = await adapter.search(query, detail, check_shipping)
+            raw = await adapter.search(query, detail, check_shipping, postal_code)
             results = [r for r in raw if r.name and matches_query(r.name, query)]
         except asyncio.TimeoutError as e:
             logger.warning("%s timed out — %s", adapter.name, e)
