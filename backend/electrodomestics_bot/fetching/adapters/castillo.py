@@ -7,8 +7,11 @@ from ..platforms.vtex import VtexAdapter
 class CastilloAdapter(VtexAdapter):
     name = "castillo"
     base_url = "https://www.castillo.com.ar"
-    postal_code = "4000"  # Tucuman capital; default 1425 (BsAs) returns zero shipping SLAs
-    _free_shipping_override = True  # all deliveries are free; skip shipping simulation
+    # Tucumán capital. Free shipping is real *within* Castillo's delivery zone (4xxx
+    # postals), but outside it the simulation returns zero SLAs → free_shipping=False.
+    # The override that previously forced True everywhere has been removed so that
+    # CABA-postal queries (1425) correctly report no free shipping.
+    postal_code = "4000"
 
     def _is_international(self, product: dict) -> Optional[bool]:
         return None  # regional store — "international" concept does not apply

@@ -25,6 +25,5 @@ class StoreAdapter(ABC):
         When check_shipping=False, shipping simulation is skipped and free_shipping=False
         for all products.
         When postal_code is provided, adapters that simulate shipping use it instead of
-        their class-level default. Regional adapters with _free_shipping_override bypass
-        shipping sim entirely, so the postal_code is silently ignored there."""
+        their class-level default."""
         ...

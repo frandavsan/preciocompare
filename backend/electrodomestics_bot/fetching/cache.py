@@ -39,6 +39,14 @@ DB_PATH = os.path.join(settings.data_dir, "cache.db")
 
 SCHEMA_VERSION = 3
 
+# Master kill switch for the product cache.
+# When True, every consumer (service.py, refresh.py, scheduler.py) skips reading
+# from and writing to cache.db — every search hits the live store APIs.
+# Why: while we iterate on shipping/postal-code logic, stale cached values for
+# free_shipping have repeatedly masked bugs and confused testing. Re-enable by
+# flipping this to False (no other code changes needed).
+CACHE_DISABLED = True
+
 # ---------------------------------------------------------------------------
 # Migrations
 # Each key is an integer version; the value is a list of SQL statements

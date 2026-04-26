@@ -40,6 +40,10 @@ async def refresh_all(detail: bool = False, conn=None) -> dict[str, int]:
     If conn is None a new DB connection is opened and closed automatically.
     Pass an existing conn to reuse a connection (caller is responsible for closing).
     """
+    if cache.CACHE_DISABLED:
+        logger.info("refresh_all() skipped (cache.CACHE_DISABLED=True)")
+        return {}
+
     started_at = datetime.now(timezone.utc).isoformat()
 
     close_after = conn is None
@@ -114,6 +118,11 @@ async def refresh_all(detail: bool = False, conn=None) -> dict[str, int]:
 
 
 def main() -> None:
+    if cache.CACHE_DISABLED:
+        print("Cache is disabled (cache.CACHE_DISABLED=True) — nothing to refresh.")
+        print("Re-enable in electrodomestics_bot/fetching/cache.py to use the daily refresh.")
+        return
+
     detail = "--detail" in sys.argv
 
     conn = cache.open_db()

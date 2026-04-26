@@ -33,6 +33,12 @@ def _lock_key(store: str, query: str, postal_code: Optional[str]) -> str:
 
 @contextmanager
 def _db():
+    if cache.CACHE_DISABLED:
+        # No connection is opened or migrated; consumers must guard cache calls
+        # behind effective_use_cache / bypass_cache_for_custom_postal so they
+        # never dereference this None.
+        yield None
+        return
     conn = cache.open_db()
     try:
         yield conn
@@ -59,6 +65,9 @@ async def search_products(
     cache or require a separate cache layer. Callers that want cached CABA behavior
     must omit postal_code entirely.
 
+    Note: while cache.CACHE_DISABLED is True, every call behaves as a cache-bypass
+    request regardless of use_cache or postal_code — see cache.py for the rationale.
+
     Concurrent requests for the same (store, query, postal_code) are serialized via
     per-key asyncio locks — the second waiter re-checks cache inside the lock and
     skips the live fetch if the first request already populated it. Different postal
@@ -68,7 +77,8 @@ async def search_products(
     # per product, computed with each adapter's default postal. Serving a non-default
     # postal from cache would return stale CABA shipping data; writing a non-default
     # postal to cache would pollute future default-postal queries.
-    bypass_cache_for_custom_postal = postal_code is not None
+    # cache.CACHE_DISABLED forces the same bypass for *every* request — see cache.py.
+    bypass_cache_for_custom_postal = postal_code is not None or cache.CACHE_DISABLED
     effective_use_cache = use_cache and not bypass_cache_for_custom_postal
 
     with _db() as conn:

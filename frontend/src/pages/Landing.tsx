@@ -1,237 +1,239 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, Info, Search } from "lucide-react";
 import TopNav from "@/components/TopNav";
 import { Checkbox } from "@/components/ui/checkbox";
-
-const STORE_OPTIONS = [
-  "Fravega",
-  "Megatone",
-  "OnCity",
-  "Montes Hermanos",
-  "Castillo",
-  "Cetrogar",
-] as const;
-
-type StoreName = (typeof STORE_OPTIONS)[number];
-
-type MockStoreResult = {
-  id: string;
-  name: string;
-  detail: string;
-  price: string;
-};
-
-type MockStoreGroup = {
-  store: StoreName;
-  results: MockStoreResult[];
-};
+import { STORE_KEYS, type StoreKey, getStoreDisplayName } from "@/lib/stores";
+import {
+  searchToStoreGroups,
+  autoSelectProducts,
+  formatPrice,
+  type StoreGroup,
+} from "@/lib/transforms";
+import { useSearch } from "@/hooks/useSearch";
 
 const STORE_OPTIONS_TOP_GAP_REM = 0.6;
 const STORE_OPTIONS_ROW_GAP_REM = 0.4;
 
-const parseMockPrice = (price: string): number => {
-  return Number(price.replace(/[^\d]/g, ""));
-};
-
-const MOCK_STORE_RESULTS: MockStoreGroup[] = [
-  {
-    store: "Fravega",
-    results: [
-      { id: "fravega-ps5-slim", name: "Sony PlayStation 5 Slim Digital", detail: "Consola digital - 1TB", price: "$949.000" },
-    ],
-  },
-  {
-    store: "Megatone",
-    results: [
-      { id: "megatone-ps5-slim", name: "PlayStation 5 Slim Digital Edition", detail: "18x sin interes disponible", price: "$959.000" },
-      { id: "megatone-ps5-bundle", name: "PlayStation 5 Slim + DualSense", detail: "Bundle con control adicional", price: "$1.089.000" },
-    ],
-  },
-  {
-    store: "OnCity",
-    results: [
-      { id: "oncity-ps5-slim", name: "Sony PS5 Slim Digital", detail: "Entrega estimada 48 hs", price: "$939.999" },
-      { id: "oncity-ps5-disc", name: "Sony PS5 Slim Standard", detail: "Version con lectora", price: "$1.049.999" },
-      { id: "oncity-ps5-spiderman", name: "PS5 Slim Spider-Man Bundle", detail: "Incluye juego digital", price: "$1.129.999" },
-    ],
-  },
-  {
-    store: "Montes Hermanos",
-    results: [
-      { id: "montes-ps5-slim", name: "PlayStation 5 Slim Digital 1TB", detail: "Retiro en sucursal", price: "$969.500" },
-    ],
-  },
-  {
-    store: "Castillo",
-    results: [
-      { id: "castillo-ps5-slim", name: "Consola Sony PlayStation 5 Slim", detail: "Envio bonificado", price: "$979.900" },
-      { id: "castillo-ps5-standard", name: "Consola Sony PlayStation 5 Standard", detail: "Stock limitado", price: "$1.069.900" },
-    ],
-  },
-  {
-    store: "Cetrogar",
-    results: [
-      { id: "cetrogar-ps5-slim", name: "Sony PlayStation 5 Slim Digital", detail: "Promocion bancaria activa", price: "$929.999" },
-      { id: "cetrogar-ps5-bundle", name: "PlayStation 5 Slim + Auriculares", detail: "Combo gaming", price: "$1.119.999" },
-    ],
-  },
-];
+const buildSelectedParam = (
+  entries: { storeKey: string; url: string }[],
+): string => JSON.stringify(entries.map((e) => ({ store: e.storeKey, url: e.url })));
 
 const Landing = () => {
+  const navigate = useNavigate();
+
   const [query, setQuery] = useState("");
   const [selectiveSearch, setSelectiveSearch] = useState(true);
   const [fromCABA, setFromCABA] = useState(false);
   const [postalCode, setPostalCode] = useState("");
   const [searchAllStores, setSearchAllStores] = useState(true);
-  const [selectedStores, setSelectedStores] = useState<string[]>([...STORE_OPTIONS]);
+  const [selectedStoreKeys, setSelectedStoreKeys] = useState<readonly StoreKey[]>(STORE_KEYS);
   const [isStoresOpen, setIsStoresOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [loadingProgress, setLoadingProgress] = useState(0);
   const [hasSearchStarted, setHasSearchStarted] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [openResultStores, setOpenResultStores] = useState<string[]>([]);
   const [selectedProductsByStore, setSelectedProductsByStore] = useState<Record<string, string>>({});
-  const timeoutRef = useRef<number | null>(null);
+
+  const [submittedQuery, setSubmittedQuery] = useState("");
+  const [submittedPostal, setSubmittedPostal] = useState<string | undefined>(undefined);
+  const [submittedSelective, setSubmittedSelective] = useState(true);
+  const [submittedFromCABA, setSubmittedFromCABA] = useState(false);
+  const [submitToken, setSubmitToken] = useState(0);
+
+  const [loadingProgress, setLoadingProgress] = useState(0);
+
   const intervalRef = useRef<number | null>(null);
   const completionRef = useRef<number | null>(null);
-  const navigate = useNavigate();
+  const handledTokenRef = useRef(0);
 
+  const { data, isFetching, error } = useSearch(submittedQuery, {
+    enabled: submitToken > 0,
+    postalCode: submittedPostal,
+  });
+
+  const isLoading = isFetching || loadingProgress > 0;
+
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (timeoutRef.current !== null) {
-        window.clearTimeout(timeoutRef.current);
-      }
-      if (intervalRef.current !== null) {
-        window.clearInterval(intervalRef.current);
-      }
-      if (completionRef.current !== null) {
-        window.clearTimeout(completionRef.current);
-      }
+      if (intervalRef.current !== null) window.clearInterval(intervalRef.current);
+      if (completionRef.current !== null) window.clearTimeout(completionRef.current);
     };
   }, []);
 
-  const handleSearchAllStoresChange = (checked: boolean) => {
-    setSearchAllStores(checked);
-    setSelectedStores(checked ? [...STORE_OPTIONS] : []);
-  };
-
-  const handleStoreToggle = (store: string, checked: boolean) => {
-    setSelectedStores((prev) => {
-      const next = checked ? [...prev, store] : prev.filter((item) => item !== store);
-      const normalized = STORE_OPTIONS.filter((item) => next.includes(item));
-      setSearchAllStores(normalized.length === STORE_OPTIONS.length);
-      return normalized;
-    });
-  };
-
-  const handleResultStoreToggle = (store: string) => {
-    setOpenResultStores((prev) =>
-      prev.includes(store) ? prev.filter((item) => item !== store) : [...prev, store]
-    );
-  };
-
-  const visibleStoreResults = MOCK_STORE_RESULTS.filter((group) => selectedStores.includes(group.store));
-  const selectedProductCount = Object.keys(selectedProductsByStore).length;
-
-  const handleCompareSelection = () => {
-    if (selectedProductCount === 0) return;
-
-    const selectedProducts = MOCK_STORE_RESULTS.flatMap((group) =>
-      group.results
-        .filter((result) => selectedProductsByStore[group.store] === result.id)
-        .map((result) => ({
-          store: group.store,
-          name: result.name,
-          price: parseMockPrice(result.price),
-        }))
-    );
-    const params = new URLSearchParams({ q: query.trim() });
-    params.set("selected", JSON.stringify(selectedProducts));
-    if (fromCABA) {
-      params.set("caba", "1");
-    } else if (postalCode.trim()) {
-      params.set("postal_code", postalCode.trim());
-    }
-    navigate(`/producto?${params.toString()}`);
-  };
-
+  // Reset and run synthetic ramp on each submit. Capped at 99 so we never
+  // claim completion before the network actually returns.
   useEffect(() => {
-    const selectedStoreSet = new Set(selectedStores);
-
-    setOpenResultStores((prev) => {
-      const next = prev.filter((store) => selectedStoreSet.has(store));
-      return next.length === prev.length ? prev : next;
-    });
-
-    setSelectedProductsByStore((prev) => {
-      const next = Object.fromEntries(
-        Object.entries(prev).filter(([store]) => selectedStoreSet.has(store))
-      );
-      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
-    });
-  }, [selectedStores]);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!query.trim() || isLoading) return;
-
-    if (timeoutRef.current !== null) {
-      window.clearTimeout(timeoutRef.current);
-    }
-    if (intervalRef.current !== null) {
-      window.clearInterval(intervalRef.current);
-    }
-    if (completionRef.current !== null) {
-      window.clearTimeout(completionRef.current);
-    }
-
-    setHasSearchStarted(selectiveSearch);
-    setShowResults(false);
-    setOpenResultStores([]);
-    setSelectedProductsByStore({});
-    setIsLoading(true);
-    setLoadingProgress(0);
-
-    const loadingMs = Math.floor(Math.random() * 3000) + 3000;
+    if (submitToken === 0) return;
+    setLoadingProgress(1);
     const startedAt = Date.now();
-
-    intervalRef.current = window.setInterval(() => {
+    const expectedMs = 9000;
+    const id = window.setInterval(() => {
       const elapsed = Date.now() - startedAt;
-      const ratio = Math.min(elapsed / loadingMs, 1);
-
+      const ratio = Math.min(elapsed / expectedMs, 1);
       setLoadingProgress((prev) => {
-        const baseTarget = Math.floor(ratio * 100);
+        if (prev >= 100) return prev;
+        const baseTarget = Math.floor(ratio * 99);
         const jumpSize = Math.floor(Math.random() * 8) + 2;
         const randomLead = Math.floor(Math.random() * 6);
         return Math.min(99, Math.max(prev, baseTarget + randomLead, prev + jumpSize));
       });
     }, 180);
+    intervalRef.current = id;
+    return () => {
+      window.clearInterval(id);
+      if (intervalRef.current === id) intervalRef.current = null;
+    };
+  }, [submitToken]);
 
-    timeoutRef.current = window.setTimeout(() => {
-      if (intervalRef.current !== null) {
-        window.clearInterval(intervalRef.current);
-        intervalRef.current = null;
+  // Drive completion exactly once per submit, when the fetch settles.
+  useEffect(() => {
+    if (submitToken === 0) return;
+    if (handledTokenRef.current === submitToken) return;
+    if (isFetching) return;
+    if (!data && !error) return;
+
+    handledTokenRef.current = submitToken;
+
+    if (intervalRef.current !== null) {
+      window.clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    setLoadingProgress(100);
+
+    const id = window.setTimeout(() => {
+      setLoadingProgress(0);
+      if (error || !data) return;
+      if (submittedSelective) {
+        setShowResults(true);
+        const groups = searchToStoreGroups(data, selectedStoreKeys);
+        setOpenResultStores(
+          groups.filter((g) => g.results.length > 0).slice(0, 2).map((g) => g.storeKey),
+        );
+      } else {
+        const auto = autoSelectProducts(data).filter((s) =>
+          selectedStoreKeys.includes(s.storeKey as StoreKey),
+        );
+        const params = new URLSearchParams({ q: submittedQuery });
+        params.set(
+          "selected",
+          buildSelectedParam(auto.map((s) => ({ storeKey: s.storeKey, url: s.product.url }))),
+        );
+        if (submittedFromCABA) params.set("caba", "1");
+        else if (submittedPostal) params.set("postal_code", submittedPostal);
+        navigate(`/producto?${params.toString()}`);
       }
+      completionRef.current = null;
+    }, 350);
+    completionRef.current = id;
+  }, [
+    submitToken,
+    isFetching,
+    data,
+    error,
+    submittedSelective,
+    submittedQuery,
+    submittedFromCABA,
+    submittedPostal,
+    selectedStoreKeys,
+    navigate,
+  ]);
 
-      setLoadingProgress(100);
-      completionRef.current = window.setTimeout(() => {
-        setIsLoading(false);
-        if (selectiveSearch) {
-          setShowResults(true);
-          setOpenResultStores(visibleStoreResults.slice(0, 2).map((group) => group.store));
-        } else {
-          const params = new URLSearchParams({ q: query.trim() });
-          if (fromCABA) {
-            params.set("caba", "1");
-          } else if (postalCode.trim()) {
-            params.set("postal_code", postalCode.trim());
-          }
-          navigate(`/producto?${params.toString()}`);
-        }
-        completionRef.current = null;
-      }, 350);
-    }, loadingMs);
+  const handleSearchAllStoresChange = (checked: boolean) => {
+    setSearchAllStores(checked);
+    setSelectedStoreKeys(checked ? STORE_KEYS : []);
+  };
+
+  const handleStoreToggle = (storeKey: StoreKey, checked: boolean) => {
+    setSelectedStoreKeys((prev) => {
+      const next = checked ? [...prev, storeKey] : prev.filter((k) => k !== storeKey);
+      const normalized = STORE_KEYS.filter((k) => next.includes(k));
+      setSearchAllStores(normalized.length === STORE_KEYS.length);
+      return normalized;
+    });
+  };
+
+  const handleResultStoreToggle = (storeKey: string) => {
+    setOpenResultStores((prev) =>
+      prev.includes(storeKey) ? prev.filter((k) => k !== storeKey) : [...prev, storeKey],
+    );
+  };
+
+  // Derive visible store groups from real API data + the current store filter.
+  const visibleStoreResults: StoreGroup[] = useMemo(() => {
+    if (!data) return [];
+    return searchToStoreGroups(data, selectedStoreKeys);
+  }, [data, selectedStoreKeys]);
+
+  const selectedProductCount = Object.keys(selectedProductsByStore).length;
+
+  // Drop selections / open accordions for stores that get unchecked.
+  useEffect(() => {
+    const selected = new Set<string>(selectedStoreKeys);
+    setOpenResultStores((prev) => {
+      const next = prev.filter((s) => selected.has(s));
+      return next.length === prev.length ? prev : next;
+    });
+    setSelectedProductsByStore((prev) => {
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([s]) => selected.has(s)),
+      );
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+  }, [selectedStoreKeys]);
+
+  const handleCompareSelection = () => {
+    if (selectedProductCount === 0 || !data) return;
+
+    const entries: { storeKey: string; url: string }[] = [];
+    for (const group of visibleStoreResults) {
+      const chosenUrl = selectedProductsByStore[group.storeKey];
+      if (!chosenUrl) continue;
+      const match = group.results.find((r) => r.url === chosenUrl);
+      if (match) entries.push({ storeKey: group.storeKey, url: match.url });
+    }
+    if (!entries.length) return;
+
+    const params = new URLSearchParams({ q: submittedQuery || query.trim() });
+    params.set("selected", buildSelectedParam(entries));
+    if (submittedFromCABA || fromCABA) {
+      params.set("caba", "1");
+    } else {
+      const cp = (submittedPostal ?? postalCode).trim();
+      if (cp) params.set("postal_code", cp);
+    }
+    navigate(`/producto?${params.toString()}`);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = query.trim();
+    if (!trimmed || isFetching) return;
+
+    if (intervalRef.current !== null) {
+      window.clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    if (completionRef.current !== null) {
+      window.clearTimeout(completionRef.current);
+      completionRef.current = null;
+    }
+
+    const trimmedPostal = postalCode.trim();
+    // CABA → send "1425" explicitly so the backend bypasses cache and runs a
+    // live shipping simulation (matches the terminal's behavior).
+    const effectivePostal = fromCABA ? "1425" : (trimmedPostal || undefined);
+
+    setSubmittedQuery(trimmed);
+    setSubmittedPostal(effectivePostal);
+    setSubmittedSelective(selectiveSearch);
+    setSubmittedFromCABA(fromCABA);
+    setHasSearchStarted(selectiveSearch);
+    setShowResults(false);
+    setOpenResultStores([]);
+    setSelectedProductsByStore({});
+    setLoadingProgress(0);
+    setSubmitToken((t) => t + 1);
   };
 
   return (
@@ -312,6 +314,11 @@ const Landing = () => {
                   style={{ width: `${loadingProgress}%` }}
                 />
               </div>
+            )}
+            {!isLoading && error && (
+              <p className="mt-3 font-mono text-[11px] uppercase tracking-[0.12em] text-destructive">
+                No se pudo completar la busqueda. Reintenta en unos segundos.
+              </p>
             )}
           </form>
 
@@ -394,14 +401,14 @@ const Landing = () => {
                         rowGap: `${STORE_OPTIONS_ROW_GAP_REM}rem`,
                       }}
                     >
-                      {STORE_OPTIONS.map((store) => (
-                        <label key={store} className="flex items-center gap-2.5 text-[12px] text-foreground">
+                      {STORE_KEYS.map((storeKey) => (
+                        <label key={storeKey} className="flex items-center gap-2.5 text-[12px] text-foreground">
                           <Checkbox
-                            checked={selectedStores.includes(store)}
-                            onCheckedChange={(checked) => handleStoreToggle(store, checked === true)}
+                            checked={selectedStoreKeys.includes(storeKey)}
+                            onCheckedChange={(checked) => handleStoreToggle(storeKey, checked === true)}
                             className="h-4 w-4"
                           />
-                          <span className="leading-[1.2]">{store}</span>
+                          <span className="leading-[1.2]">{getStoreDisplayName(storeKey)}</span>
                         </label>
                       ))}
                     </div>
@@ -435,17 +442,23 @@ const Landing = () => {
 
                 {visibleStoreResults.length > 0 ? (
                   visibleStoreResults.map((group) => {
-                    const isOpen = openResultStores.includes(group.store);
+                    const isOpen = openResultStores.includes(group.storeKey);
+                    const headerCount =
+                      group.status === "error" || group.status === "timeout"
+                        ? "error"
+                        : group.results.length === 0
+                          ? "sin resultados"
+                          : `${group.results.length} ${group.results.length === 1 ? "resultado" : "resultados"}`;
                     return (
-                      <div key={group.store} className="structured-card bg-card/85 p-4">
+                      <div key={group.storeKey} className="structured-card bg-card/85 p-4">
                         <button
                           type="button"
-                          onClick={() => handleResultStoreToggle(group.store)}
+                          onClick={() => handleResultStoreToggle(group.storeKey)}
                           className="flex w-full items-center justify-between gap-4 text-left"
                           aria-expanded={isOpen}
                         >
                           <span className="font-mono text-[12px] uppercase tracking-[0.14em] text-foreground">
-                            {group.store} ({group.results.length} {group.results.length === 1 ? "resultado" : "resultados"})
+                            {group.displayName} ({headerCount})
                           </span>
                           <span className="inline-flex h-7 w-7 items-center justify-center rounded-sm bg-muted/70 text-primary transition-colors hover:bg-muted">
                             <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
@@ -454,34 +467,48 @@ const Landing = () => {
 
                         {isOpen && (
                           <div className="mt-4 space-y-2">
-                            {group.results.map((result) => (
-                              <label
-                                key={result.id}
-                                className="flex cursor-pointer items-start gap-3 rounded-sm bg-background/55 px-3 py-3 transition-colors hover:bg-background/85"
-                              >
-                                <Checkbox
-                                  checked={selectedProductsByStore[group.store] === result.id}
-                                  onCheckedChange={(checked) =>
-                                    setSelectedProductsByStore((prev) => {
-                                      if (checked === true) {
-                                        return { ...prev, [group.store]: result.id };
-                                      }
-
-                                      const rest = { ...prev };
-                                      delete rest[group.store];
-                                      return rest;
-                                    })
-                                  }
-                                  className="mt-0.5"
-                                />
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-                                    <span className="text-sm font-medium text-foreground">{result.name}</span>
-                                    <span className="font-mono text-xs font-semibold text-secondary">{result.price}</span>
+                            {group.results.length === 0 ? (
+                              <div className="rounded-sm bg-background/55 px-3 py-3 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+                                {group.status === "error" || group.status === "timeout"
+                                  ? "La tienda no respondio en esta busqueda."
+                                  : "Sin resultados para esta tienda."}
+                              </div>
+                            ) : (
+                              group.results.map((result) => (
+                                <label
+                                  key={result.url}
+                                  className="flex cursor-pointer items-start gap-3 rounded-sm bg-background/55 px-3 py-3 transition-colors hover:bg-background/85"
+                                >
+                                  <Checkbox
+                                    checked={selectedProductsByStore[group.storeKey] === result.url}
+                                    onCheckedChange={(checked) =>
+                                      setSelectedProductsByStore((prev) => {
+                                        if (checked === true) {
+                                          return { ...prev, [group.storeKey]: result.url };
+                                        }
+                                        const rest = { ...prev };
+                                        delete rest[group.storeKey];
+                                        return rest;
+                                      })
+                                    }
+                                    className="mt-0.5"
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+                                      <span className="text-sm font-medium text-foreground">{result.name}</span>
+                                      <span className="font-mono text-xs font-semibold text-secondary">
+                                        {formatPrice(result.price)}
+                                      </span>
+                                    </div>
+                                    {result.detail && (
+                                      <span className="mt-1 block font-mono text-[10px] tracking-wide text-muted-foreground">
+                                        {result.detail}
+                                      </span>
+                                    )}
                                   </div>
-                                </div>
-                              </label>
-                            ))}
+                                </label>
+                              ))
+                            )}
                           </div>
                         )}
                       </div>
@@ -489,7 +516,7 @@ const Landing = () => {
                   })
                 ) : (
                   <div className="structured-card bg-card/85 p-5 text-sm text-muted-foreground">
-                    No hay tiendas seleccionadas. Activa al menos una tienda para ver resultados mock.
+                    No hay tiendas seleccionadas. Activa al menos una tienda para ver resultados.
                   </div>
                 )}
 
@@ -519,7 +546,9 @@ const Landing = () => {
       </main>
 
       <footer className="relative z-10 h-9 flex items-center justify-center border-t-2 border-border bg-card/90 backdrop-blur-[2px] shrink-0">
-        <span className="font-mono text-[10px] tracking-wide text-muted-foreground">v1.0.0 · data.mock · 5 tiendas indexadas</span>
+        <span className="font-mono text-[10px] tracking-wide text-muted-foreground">
+          v1.0.0 · data.live · {STORE_KEYS.length} tiendas indexadas
+        </span>
       </footer>
     </div>
   );

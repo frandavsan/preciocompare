@@ -5,6 +5,22 @@ None of these are show-stoppers for local dev or private betas — they are inte
 
 ---
 
+## 0. Re-enable the product cache
+
+**File:** `electrodomestics_bot/fetching/cache.py` → `CACHE_DISABLED`
+
+The SQLite product cache (`data/cache.db`) is currently **disabled** via `CACHE_DISABLED = True`. Every search hits the live store APIs, no rows are read from or written to `cache.db`, and the daily refresh job is not registered with the scheduler (`scheduler.py` skips it; `refresh.py` early-exits if invoked manually).
+
+**Why it's off:** while iterating on shipping/postal-code logic, stale cached `free_shipping` values repeatedly masked bugs and made testing unreliable. Going live without caching gives accurate per-request results at the cost of latency.
+
+**To re-enable:** set `CACHE_DISABLED = False` in `cache.py`. Nothing else needs to change — `service.py`, `refresh.py`, and `scheduler.py` all read this flag at runtime. After flipping it, also revisit:
+
+- Rate limits (item 6) — caching dramatically reduces upstream load, so you may want lower per-IP limits without it.
+- The daily refresh cron (item 4) — only meaningful with the cache on.
+- The data directory (item 5) — `cache.db` is only created when the cache is enabled.
+
+---
+
 ## 1. Set CORS origins (security)
 
 **File:** `electrodomestics_bot/config.py` → env var `CORS_ORIGINS`
@@ -19,17 +35,21 @@ Do **not** use `*` in production unless you have a deliberate reason (e.g. a ful
 
 ---
 
-## 2. Set the Supabase JWT secret (auth)
+## 2. Configure Supabase JWT verification (auth)
 
-**File:** `electrodomestics_bot/config.py` → env var `SUPABASE_JWT_SECRET`
+**File:** `electrodomestics_bot/config.py` → env vars `SUPABASE_URL`, `SUPABASE_JWT_SECRET`
 
-The default is an empty string, which means JWT validation will fail for every request. Set this to the JWT secret from your Supabase project dashboard (Settings → API → JWT Secret).
+Auth supports two modes (see `auth.py`):
+
+- **ES256/RS256 (current Supabase default):** the JWT is verified against the project's JWKS endpoint. Requires `SUPABASE_URL=https://<project>.supabase.co`.
+- **HS256 (legacy shared-secret):** verified against `SUPABASE_JWT_SECRET` from the Supabase dashboard (Settings → API → JWT Secret).
 
 ```
-SUPABASE_JWT_SECRET=your-secret-here
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_JWT_SECRET=your-legacy-hs256-secret      # only needed for HS256 tokens
 ```
 
-Without this, the `/search` and `/health` endpoints return 401/500 for all authenticated calls.
+The following endpoints reject every call until at least one of these is configured for the algorithm of the incoming token: `/search`, `/stores`, `/health/detail`, `/health/anomalies`, `POST /health/anomalies/{id}/acknowledge`. The plain `/health` is a public liveness probe and stays open by design.
 
 ---
 
@@ -53,8 +73,8 @@ Optionally adjust `ALERT_MIN_SEVERITY` (default: `critical`) to also receive `wa
 **File:** `electrodomestics_bot/config.py` → env vars `REFRESH_CRON`, `CANARY_INTERVAL_HOURS`
 
 Defaults:
-- Cache refresh: `0 8 * * *` (daily at 08:00 UTC)
-- Canary health probes: every 4 hours
+- Cache refresh: `0 8 * * *` (daily at 08:00 UTC) — **inert while `CACHE_DISABLED=True`** (see item 0); the scheduler does not register the job.
+- Canary health probes: every 4 hours — runs regardless of cache state, since canaries hit live store APIs and only write to `monitoring.db`.
 
 Adjust these to match your expected traffic patterns and how stale you can tolerate the cache being. The refresh cron runs against all stores simultaneously, so make sure your host can handle the outbound HTTP load at the scheduled time.
 
@@ -64,7 +84,7 @@ Adjust these to match your expected traffic patterns and how stale you can toler
 
 **File:** `electrodomestics_bot/config.py` → env var `DATA_DIR`
 
-Default: `./data/` relative to the project root. The SQLite cache (`cache.db`) and monitoring DB (`monitoring.db`) are written here. In containerized deployments, make sure this path is a mounted volume — otherwise data is lost on container restart.
+Default: `./data/` relative to the project root. While `CACHE_DISABLED=True` only `monitoring.db` and the on-disk image cache (`images/`) live here. Once the product cache is re-enabled (item 0), `cache.db` is also written here. In containerized deployments, make sure this path is a mounted volume — otherwise data is lost on container restart.
 
 ```
 DATA_DIR=/var/data/electrodomesticsbot
@@ -76,11 +96,14 @@ DATA_DIR=/var/data/electrodomesticsbot
 
 **File:** `electrodomestics_bot/api.py`
 
-Current limits:
-- `POST /search` → 10 requests/minute per IP
-- `GET /health` → 20 requests/minute per IP
+Current limits (per IP, via `slowapi`):
+- `GET /search` → 10 requests/minute
+- `GET /stores` → 20 requests/minute
+- All other endpoints (`/health`, `/health/detail`, `/health/anomalies`, `POST /health/anomalies/{id}/acknowledge`) → unlimited
 
-These are reasonable for a small user base. If you expect higher traffic or want to differentiate limits by client (e.g. per API key instead of per IP), the `slowapi` limiter will need a different `key_func`.
+These limits assume the cache is on. With `CACHE_DISABLED=True` (see item 0), every `/search` triggers live calls to all configured stores in parallel — consider lowering the per-IP cap until the cache is re-enabled.
+
+If you expect higher traffic or want to differentiate limits by client (e.g. per API key instead of per IP), the `slowapi` limiter will need a different `key_func`.
 
 ---
 

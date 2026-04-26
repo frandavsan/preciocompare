@@ -20,6 +20,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from .config import settings
+from .fetching import cache as _cache
 
 logger = logging.getLogger(__name__)
 
@@ -78,13 +79,16 @@ def start() -> None:
 
     _scheduler = AsyncIOScheduler(timezone="UTC")
 
-    _scheduler.add_job(
-        _refresh_job,
-        trigger=CronTrigger.from_crontab(settings.refresh_cron),
-        id="refresh",
-        name="Cache refresh + canary",
-        misfire_grace_time=3600,
-    )
+    if not _cache.CACHE_DISABLED:
+        _scheduler.add_job(
+            _refresh_job,
+            trigger=CronTrigger.from_crontab(settings.refresh_cron),
+            id="refresh",
+            name="Cache refresh + canary",
+            misfire_grace_time=3600,
+        )
+    else:
+        logger.info("Refresh job skipped (cache.CACHE_DISABLED=True)")
 
     _scheduler.add_job(
         _canary_job,
@@ -97,7 +101,7 @@ def start() -> None:
     _scheduler.start()
     logger.info(
         "Scheduler started — refresh=%s, canary=every %dh",
-        settings.refresh_cron,
+        "disabled" if _cache.CACHE_DISABLED else settings.refresh_cron,
         settings.canary_interval_hours,
     )
 

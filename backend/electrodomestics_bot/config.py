@@ -5,16 +5,26 @@ Every deployment-relevant setting lives here. Pydantic Settings reads
 from env vars automatically (case-insensitive), so ``DATA_DIR=...`` in
 the environment maps to ``settings.data_dir``.
 
-No .env file is needed — env vars are injected by Docker, Railway,
-or whatever host runs the service.
+In production (Docker, Railway, etc.) env vars are injected directly.
+For local development, a ``backend/.env`` file is loaded if present —
+gitignored, so secrets never leak.
 """
 
 import os
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=os.path.join(
+            os.path.normpath(os.path.join(os.path.dirname(__file__), "..")),
+            ".env",
+        ),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
     # -- Database --
     # Absolute path, or relative to project root.
     data_dir: str = os.path.join(
@@ -23,6 +33,9 @@ class Settings(BaseSettings):
     )
 
     # -- Auth --
+    # Project URL used to fetch JWKS for ES256/RS256 verification.
+    supabase_url: str = ""
+    # Legacy HS256 shared secret. Only required for projects still on symmetric signing.
     supabase_jwt_secret: str = ""
 
     # -- CORS --

@@ -11,87 +11,113 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { products, stores, formatPrice } from "@/data/mockData";
-import type { Product, StorePrice } from "@/data/mockData";
 import TopNav from "@/components/TopNav";
+import { useSearch } from "@/hooks/useSearch";
+import {
+  applySelection,
+  autoSelectProducts,
+  bestSinInteresCount,
+  formatBestPromo,
+  formatPrice,
+  resolveImageUrl,
+} from "@/lib/transforms";
+import { getStoreColor } from "@/lib/stores";
 
-type SelectedComparisonPrice = StorePrice & {
+type SelectedSlot = { store: string; url: string };
+
+interface ComparisonRow {
+  storeKey: string;
+  displayName: string;
   productName: string;
-};
-
-function findProduct(query: string): Product {
-  const q = query.toLowerCase();
-  const match = products.find(
-    (p) => p.name.toLowerCase().includes(q) || q.includes(p.name.toLowerCase().split(" ")[0])
-  );
-  return match || products[0];
+  price: number;
+  url: string;
+  available: boolean;
+  freeShipping: boolean;
+  bestPromo: string | null;
+  bestPromoCount: number;
 }
 
-function getBestPromo(store: string, price: number): string {
-  const installmentOptions: Record<string, number> = {
-    "Mercado Libre": 12,
-    Fravega: 9,
-    Garbarino: 6,
-    Musimundo: 12,
-    Megatone: 18,
-  };
-
-  const installments = installmentOptions[store] || 6;
-  const installmentPrice = formatPrice(Math.round(price / installments)).replace(/\$\s+/u, "$");
-  return `${installments}x sin interes de ${installmentPrice}`;
-}
-
-function getPromoInstallments(store: string): number {
-  const installmentOptions: Record<string, number> = {
-    "Mercado Libre": 12,
-    Fravega: 9,
-    Garbarino: 6,
-    Musimundo: 12,
-    Megatone: 18,
-  };
-
-  return installmentOptions[store] || 6;
-}
-
-function parseSelectedComparisons(value: string | null): SelectedComparisonPrice[] {
+function parseSelectedSlots(value: string | null): SelectedSlot[] {
   if (!value) return [];
-
   try {
-    const parsed = JSON.parse(value) as Array<{ store?: unknown; name?: unknown; price?: unknown }>;
+    const parsed = JSON.parse(value) as Array<{ store?: unknown; url?: unknown }>;
     if (!Array.isArray(parsed)) return [];
-
     return parsed
-      .filter(
-        (item) =>
-          typeof item.store === "string" &&
-          typeof item.name === "string" &&
-          typeof item.price === "number" &&
-          Number.isFinite(item.price)
-      )
-      .map((item, index) => ({
-        store: item.store as string,
-        productName: item.name as string,
-        price: item.price as number,
-        currency: "ARS",
-        url: "#",
-        inStock: true,
-        freeShipping: index % 2 === 0,
-      }));
+      .filter((item) => typeof item.store === "string" && typeof item.url === "string")
+      .map((item) => ({ store: item.store as string, url: item.url as string }));
   } catch {
     return [];
   }
 }
+
+const HISTORY_MONTHS = ["Sep", "Oct", "Nov", "Dic", "Ene", "Feb", "Mar"];
+
+const PageShell = ({ children }: { children: React.ReactNode }) => (
+  <div className="relative min-h-screen overflow-x-hidden bg-background paper-texture isolate">
+    <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden="true">
+      <div className="absolute -left-[11rem] -top-[8rem] h-[24rem] w-[26rem] rounded-[42%_58%_62%_38%/56%_34%_66%_44%] bg-[radial-gradient(circle_at_65%_40%,hsl(278_70%_86%_/_0.5),hsl(258_55%_78%_/_0.24)_58%,transparent_72%)] blur-[6px]" />
+      <div className="absolute left-[7rem] top-[4.5rem] h-[8rem] w-[8rem] rotate-12 rounded-[38%_62%_60%_40%/45%_42%_58%_55%] bg-[linear-gradient(135deg,hsl(278_72%_86%_/_0.42),hsl(252_56%_81%_/_0.14))]" />
+      <div className="absolute -right-[6rem] -top-[2.5rem] h-[20rem] w-[24rem] rounded-[40%_60%_38%_62%/52%_42%_58%_48%] bg-[radial-gradient(circle_at_35%_45%,hsl(189_75%_82%_/_0.52),hsl(251_58%_84%_/_0.24)_58%,transparent_76%)]" />
+      <div className="absolute -right-[7rem] bottom-[2rem] h-[22rem] w-[25rem] rounded-[46%_54%_36%_64%/41%_48%_52%_59%] bg-[radial-gradient(circle_at_32%_38%,hsl(179_54%_78%_/_0.54),hsl(193_56%_74%_/_0.2)_54%,transparent_76%)]" />
+    </div>
+    <TopNav activeSection="market-data" />
+    {children}
+  </div>
+);
+
+const StatusPanel = ({
+  eyebrow,
+  title,
+  description,
+  spinner = false,
+}: {
+  eyebrow: string;
+  title: string;
+  description?: string;
+  spinner?: boolean;
+}) => (
+  <main className="relative z-10 mx-auto flex min-h-[60vh] max-w-[1560px] flex-col items-center justify-center px-3 lg:px-4 py-8">
+    <div className="structured-card soft-elevation max-w-md bg-card/90 px-8 py-8 text-center">
+      <div className="section-eyebrow mb-3 justify-center">{eyebrow}</div>
+      <div className="flex items-center justify-center gap-3">
+        {spinner && (
+          <span className="h-4 w-4 animate-spin rounded-full border-[1.5px] border-border border-t-primary" />
+        )}
+        <h2 className="font-mono text-[12px] uppercase tracking-[0.18em] text-foreground">{title}</h2>
+      </div>
+      {description && (
+        <p className="mt-3 font-mono text-[10px] tracking-wide text-muted-foreground">
+          {description}
+        </p>
+      )}
+      <Link
+        to="/"
+        className="mt-6 inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-primary hover:text-primary/80"
+      >
+        <ArrowLeft className="h-3 w-3" />
+        Volver
+      </Link>
+    </div>
+  </main>
+);
 
 const ProductIntelligence = () => {
   const [searchParams] = useSearchParams();
   const query = searchParams.get("q") || "";
   const fromCABA = searchParams.get("caba") === "1";
   const postalCode = searchParams.get("postal_code") ?? "";
-  const selectedComparisonPrices = useMemo(
-    () => parseSelectedComparisons(searchParams.get("selected")),
-    [searchParams]
+
+  const selection = useMemo(
+    () => parseSelectedSlots(searchParams.get("selected")),
+    [searchParams],
   );
-  const isSelectiveComparison = selectedComparisonPrices.length > 0;
+  const isSelectiveComparison = selection.length > 0;
+
+  const { data, isLoading, error } = useSearch(query, {
+    enabled: !!query,
+    postalCode: postalCode || undefined,
+  });
+
   const [priceOrder, setPriceOrder] = useState<"asc" | "desc" | "promo">("asc");
   const [isPaymentAnalysisLoading, setIsPaymentAnalysisLoading] = useState(false);
   const [paymentAnalysisProgress, setPaymentAnalysisProgress] = useState(0);
@@ -113,85 +139,85 @@ const ProductIntelligence = () => {
     };
   }, []);
 
-  const product = useMemo(() => findProduct(query), [query]);
-  const comparisonPrices = useMemo(
-    () => (isSelectiveComparison ? selectedComparisonPrices : product.prices),
-    [isSelectiveComparison, product.prices, selectedComparisonPrices]
+  const perStoreProducts = useMemo(() => {
+    if (!data) return [];
+    return isSelectiveComparison ? applySelection(data, selection) : autoSelectProducts(data);
+  }, [data, isSelectiveComparison, selection]);
+
+  const comparisonRows: ComparisonRow[] = useMemo(
+    () =>
+      perStoreProducts
+        .filter((s) => s.product.price !== null)
+        .map(({ storeKey, displayName, product }) => ({
+          storeKey,
+          displayName,
+          productName: product.name,
+          price: product.price as number,
+          url: product.url,
+          available: product.available,
+          freeShipping: product.free_shipping,
+          bestPromo: formatBestPromo(product),
+          bestPromoCount: bestSinInteresCount(product) ?? 0,
+        })),
+    [perStoreProducts],
   );
-  const displayProductName = isSelectiveComparison ? query || "Productos seleccionados" : product.name;
-  const displayCategory = isSelectiveComparison ? "Seleccion manual" : product.category;
 
-  const cheapestFirstPrices = useMemo(
-    () => [...comparisonPrices].sort((a, b) => a.price - b.price),
-    [comparisonPrices]
+  const heroImage = useMemo(() => {
+    for (const { product } of perStoreProducts) {
+      const resolved = resolveImageUrl(product.image_url);
+      if (resolved) return resolved;
+    }
+    return null;
+  }, [perStoreProducts]);
+
+  const cheapestFirst = useMemo(
+    () => [...comparisonRows].sort((a, b) => a.price - b.price),
+    [comparisonRows],
   );
 
-  const sortedPrices = useMemo(
-    () => {
-      if (priceOrder === "asc") return cheapestFirstPrices;
-      if (priceOrder === "desc") return [...cheapestFirstPrices].reverse();
+  const sortedRows = useMemo(() => {
+    if (priceOrder === "asc") return cheapestFirst;
+    if (priceOrder === "desc") return [...cheapestFirst].reverse();
+    return [...cheapestFirst].sort((a, b) => {
+      const promoDiff = b.bestPromoCount - a.bestPromoCount;
+      if (promoDiff !== 0) return promoDiff;
+      return a.price - b.price;
+    });
+  }, [cheapestFirst, priceOrder]);
 
-      return [...cheapestFirstPrices].sort((a, b) => {
-        const promoDiff = getPromoInstallments(b.store) - getPromoInstallments(a.store);
-        if (promoDiff !== 0) return promoDiff;
-        return a.price - b.price;
+  const minPrice = cheapestFirst[0]?.price ?? 0;
+  const maxPrice = cheapestFirst[cheapestFirst.length - 1]?.price ?? 0;
+  const avgPrice = comparisonRows.length
+    ? Math.round(comparisonRows.reduce((acc, r) => acc + r.price, 0) / comparisonRows.length)
+    : 0;
+  const storesFound = comparisonRows.length;
+
+  const cheapVsAvg = avgPrice ? (((minPrice - avgPrice) / avgPrice) * 100).toFixed(1) : "0.0";
+  const expVsAvg = avgPrice ? (((maxPrice - avgPrice) / avgPrice) * 100).toFixed(1) : "0.0";
+  const minVsMax = maxPrice ? (((minPrice - maxPrice) / maxPrice) * 100).toFixed(1) : "0.0";
+  const avgToCheapestGap = avgPrice
+    ? `- ${(((avgPrice - minPrice) / avgPrice) * 100).toFixed(1)}%`
+    : "0.0%";
+
+  const lineData = useMemo(() => {
+    return HISTORY_MONTHS.map((date) => {
+      const entry: Record<string, string | number> = { date };
+      cheapestFirst.forEach((row) => {
+        entry[row.displayName] = row.price;
       });
-    },
-    [cheapestFirstPrices, priceOrder]
-  );
+      return entry;
+    });
+  }, [cheapestFirst]);
 
-  const minPrice = cheapestFirstPrices[0]?.price || 0;
-  const maxPrice = cheapestFirstPrices[cheapestFirstPrices.length - 1]?.price || 0;
-  const avgPrice = Math.round(
-    comparisonPrices.reduce((a, b) => a + b.price, 0) / comparisonPrices.length
-  );
-  const storesFound = comparisonPrices.length;
-
-  const cheapVsAvg = (((minPrice - avgPrice) / avgPrice) * 100).toFixed(1);
-  const expVsAvg = (((maxPrice - avgPrice) / avgPrice) * 100).toFixed(1);
-  const minVsMax = (((minPrice - maxPrice) / maxPrice) * 100).toFixed(1);
-  const avgToCheapestGap = `- ${(((avgPrice - minPrice) / avgPrice) * 100).toFixed(1)}%`;
-
-  const dates = [...new Set(product.priceHistory.map((p) => p.date))];
-  const lineData = dates.map((date) => {
-    const entry: Record<string, string | number> = { date };
-    product.priceHistory
-      .filter((p) => p.date === date)
-      .forEach((p) => {
-        entry[p.store] = p.price;
-      });
-    return entry;
-  });
-  const storesInHistory = [...new Set(product.priceHistory.map((p) => p.store))];
-
-  const barData = cheapestFirstPrices.map((sp) => ({
-    store: sp.store.split(" ").slice(0, 2).join(" "),
-    price: sp.price,
-    fill: stores.find((s) => s.name === sp.store)?.color || "hsl(262, 52%, 47%)",
-    isBest: sp.price === minPrice,
+  const barData = cheapestFirst.map((row) => ({
+    store: row.displayName.split(" ").slice(0, 2).join(" "),
+    price: row.price,
+    fill: getStoreColor(row.storeKey),
+    isBest: row.price === minPrice,
   }));
 
-  const metrics = [
-    { label: "Tiendas encontradas", value: storesFound.toString() },
-    { label: "Precio promedio", value: formatPrice(avgPrice) },
-    {
-      label: "Mas bajo vs promedio",
-      value: `- ${Math.abs(Number(cheapVsAvg)).toFixed(1)}%`,
-      detail: `(${formatPrice(avgPrice - minPrice)})`,
-      accent: true,
-    },
-    {
-      label: "Mas alto vs promedio",
-      value: `+ ${Math.abs(Number(expVsAvg)).toFixed(1)}%`,
-      detail: `(${formatPrice(maxPrice - avgPrice)})`,
-    },
-    {
-      label: "Brecha min-max",
-      value: `- ${Math.abs(Number(minVsMax)).toFixed(1)}%`,
-      detail: `(${formatPrice(maxPrice - minPrice)})`,
-      accent: true,
-    },
-  ];
+  const displayProductName = query || "Productos seleccionados";
+  const displayCategory = isSelectiveComparison ? "Seleccion manual" : "Seleccion automatica";
 
   const handlePaymentAnalysisRequest = () => {
     if (isPaymentAnalysisLoading) return;
@@ -239,17 +265,57 @@ const ProductIntelligence = () => {
     }, loadingMs);
   };
 
+  if (!query) {
+    return (
+      <PageShell>
+        <StatusPanel
+          eyebrow="Inteligencia de producto"
+          title="Falta la consulta"
+          description="Volve a Landing y enviá una busqueda para generar el analisis."
+        />
+      </PageShell>
+    );
+  }
+
+  if (isLoading || (!data && !error)) {
+    return (
+      <PageShell>
+        <StatusPanel
+          eyebrow="Inteligencia de producto"
+          title={`Cargando "${query}"`}
+          description="Consultando precios y promociones en vivo."
+          spinner
+        />
+      </PageShell>
+    );
+  }
+
+  if (error) {
+    return (
+      <PageShell>
+        <StatusPanel
+          eyebrow="Inteligencia de producto"
+          title="No se pudo cargar la busqueda"
+          description="Reintenta en unos segundos o ajusta la consulta."
+        />
+      </PageShell>
+    );
+  }
+
+  if (!comparisonRows.length) {
+    return (
+      <PageShell>
+        <StatusPanel
+          eyebrow="Inteligencia de producto"
+          title={`Sin resultados para "${query}"`}
+          description="Ninguna tienda devolvio productos con precio para esta consulta."
+        />
+      </PageShell>
+    );
+  }
+
   return (
-    <div className="relative min-h-screen overflow-x-hidden bg-background paper-texture isolate">
-      <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden="true">
-        <div className="absolute -left-[11rem] -top-[8rem] h-[24rem] w-[26rem] rounded-[42%_58%_62%_38%/56%_34%_66%_44%] bg-[radial-gradient(circle_at_65%_40%,hsl(278_70%_86%_/_0.5),hsl(258_55%_78%_/_0.24)_58%,transparent_72%)] blur-[6px]" />
-        <div className="absolute left-[7rem] top-[4.5rem] h-[8rem] w-[8rem] rotate-12 rounded-[38%_62%_60%_40%/45%_42%_58%_55%] bg-[linear-gradient(135deg,hsl(278_72%_86%_/_0.42),hsl(252_56%_81%_/_0.14))]" />
-        <div className="absolute -right-[6rem] -top-[2.5rem] h-[20rem] w-[24rem] rounded-[40%_60%_38%_62%/52%_42%_58%_48%] bg-[radial-gradient(circle_at_35%_45%,hsl(189_75%_82%_/_0.52),hsl(251_58%_84%_/_0.24)_58%,transparent_76%)]" />
-        <div className="absolute -right-[7rem] bottom-[2rem] h-[22rem] w-[25rem] rounded-[46%_54%_36%_64%/41%_48%_52%_59%] bg-[radial-gradient(circle_at_32%_38%,hsl(179_54%_78%_/_0.54),hsl(193_56%_74%_/_0.2)_54%,transparent_76%)]" />
-      </div>
-
-      <TopNav activeSection="market-data" />
-
+    <PageShell>
       <main className="relative z-10 max-w-[1560px] mx-auto px-3 lg:px-4 py-8">
         <div className="mb-5 flex items-center justify-between gap-4 px-1">
           <Link to="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
@@ -280,12 +346,20 @@ const ProductIntelligence = () => {
                 <div className="relative mx-0 w-full max-w-[320px] aspect-square flex items-center justify-center">
                   <div className="absolute inset-1 rounded-[2.35rem] bg-card/90 soft-elevation" />
                   <div className="absolute inset-0 rounded-[2.5rem] border border-border/60 bg-gradient-to-br from-card/90 via-card/55 to-primary/5" />
-                  <img
-                    src={product.imageUrl}
-                    alt={displayProductName}
-                    className="relative h-full w-full rounded-[2.25rem] object-contain p-6 drop-shadow-[0_18px_24px_hsl(220_20%_14%_/_0.15)]"
-                    loading="eager"
-                  />
+                  {heroImage ? (
+                    <img
+                      src={heroImage}
+                      alt={displayProductName}
+                      className="relative h-full w-full rounded-[2.25rem] object-contain p-6 drop-shadow-[0_18px_24px_hsl(220_20%_14%_/_0.15)]"
+                      loading="eager"
+                    />
+                  ) : (
+                    <div className="relative flex h-full w-full items-center justify-center rounded-[2.25rem] p-6">
+                      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground text-center">
+                        Sin imagen<br />disponible
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="min-w-0 pt-3">
                   <div className="flex items-center gap-3 flex-wrap mb-5">
@@ -362,7 +436,27 @@ const ProductIntelligence = () => {
             <section className="structured-card soft-elevation p-5 transform-gpu transition-[transform,box-shadow,background-color] duration-200 ease-out hover:-translate-y-0.5 hover:scale-[1.025] hover:bg-card">
               <div className="section-eyebrow mb-4">Metricas de mercado</div>
               <div className="space-y-3">
-                {metrics.map((m) => (
+                {[
+                  { label: "Tiendas encontradas", value: storesFound.toString() },
+                  { label: "Precio promedio", value: formatPrice(avgPrice) },
+                  {
+                    label: "Mas bajo vs promedio",
+                    value: `- ${Math.abs(Number(cheapVsAvg)).toFixed(1)}%`,
+                    detail: `(${formatPrice(avgPrice - minPrice)})`,
+                    accent: true,
+                  },
+                  {
+                    label: "Mas alto vs promedio",
+                    value: `+ ${Math.abs(Number(expVsAvg)).toFixed(1)}%`,
+                    detail: `(${formatPrice(maxPrice - avgPrice)})`,
+                  },
+                  {
+                    label: "Brecha min-max",
+                    value: `- ${Math.abs(Number(minVsMax)).toFixed(1)}%`,
+                    detail: `(${formatPrice(maxPrice - minPrice)})`,
+                    accent: true,
+                  },
+                ].map((m) => (
                   <div key={m.label} className="flex items-start justify-between gap-4 border-b border-border/80 pb-3 last:border-b-0 last:pb-0">
                     <span className="editorial-label">{m.label}</span>
                     <div className="text-right pt-[1px]">
@@ -408,9 +502,7 @@ const ProductIntelligence = () => {
               <TableHeader>
                 <TableRow className="border-border hover:bg-transparent">
                   <TableHead className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-medium">Tienda</TableHead>
-                  {isSelectiveComparison && (
-                    <TableHead className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-medium">Producto seleccionado</TableHead>
-                  )}
+                  <TableHead className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-medium">Producto seleccionado</TableHead>
                   <TableHead className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-medium">Precio</TableHead>
                   <TableHead className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-medium">vs Promedio</TableHead>
                   <TableHead className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-medium">vs Mas caro</TableHead>
@@ -421,22 +513,20 @@ const ProductIntelligence = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sortedPrices.map((sp) => {
-                  const diff = (((sp.price - avgPrice) / avgPrice) * 100).toFixed(1);
-                  const diffVsMax = (((sp.price - maxPrice) / maxPrice) * 100).toFixed(1);
+                {sortedRows.map((row) => {
+                  const diff = avgPrice ? (((row.price - avgPrice) / avgPrice) * 100).toFixed(1) : "0.0";
+                  const diffVsMax = maxPrice ? (((row.price - maxPrice) / maxPrice) * 100).toFixed(1) : "0.0";
                   return (
-                    <TableRow key={`${sp.store}-${"productName" in sp ? sp.productName : sp.price}`} className={`border-border hover:bg-accent/40 ${sp.price === minPrice ? "bg-accent/30" : ""}`}>
-                      <TableCell className="text-sm font-medium">{sp.store}</TableCell>
-                      {isSelectiveComparison && (
-                        <TableCell className="max-w-[280px] text-sm text-foreground">
-                          <span className="line-clamp-2">{"productName" in sp ? sp.productName : displayProductName}</span>
-                        </TableCell>
-                      )}
+                    <TableRow key={`${row.storeKey}-${row.url}`} className={`border-border hover:bg-accent/40 ${row.price === minPrice ? "bg-accent/30" : ""}`}>
+                      <TableCell className="text-sm font-medium">{row.displayName}</TableCell>
+                      <TableCell className="max-w-[280px] text-sm text-foreground">
+                        <span className="line-clamp-2">{row.productName}</span>
+                      </TableCell>
                       <TableCell>
-                        <span className={`font-mono text-sm font-semibold ${sp.price === minPrice ? "text-secondary" : "text-foreground"}`}>
-                          {formatPrice(sp.price)}
+                        <span className={`font-mono text-sm font-semibold ${row.price === minPrice ? "text-secondary" : "text-foreground"}`}>
+                          {formatPrice(row.price)}
                         </span>
-                        {sp.price === minPrice && (
+                        {row.price === minPrice && (
                           <span className="ml-2 font-mono text-[9px] uppercase tracking-wider text-secondary border border-secondary px-1.5 py-0.5 rounded-sm font-medium">
                             Mejor
                           </span>
@@ -456,25 +546,25 @@ const ProductIntelligence = () => {
                       </TableCell>
                       <TableCell>
                         <span className="font-mono text-xs text-muted-foreground">
-                          {getBestPromo(sp.store, sp.price)}
+                          {row.bestPromo ?? "—"}
                         </span>
                       </TableCell>
                       <TableCell className="text-center">
-                        {sp.inStock ? (
+                        {row.available ? (
                           <Check className="h-3.5 w-3.5 text-secondary mx-auto" />
                         ) : (
                           <X className="h-3.5 w-3.5 text-destructive mx-auto" />
                         )}
                       </TableCell>
                       <TableCell className="text-center">
-                        {sp.freeShipping ? (
+                        {row.freeShipping ? (
                           <Check className="h-3.5 w-3.5 text-secondary mx-auto" />
                         ) : (
                           <X className="h-3.5 w-3.5 text-destructive mx-auto" />
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        <a href={sp.url} className="text-primary hover:text-primary/70 transition-colors">
+                        <a href={row.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/70 transition-colors">
                           <ExternalLink className="h-3.5 w-3.5 inline" />
                         </a>
                       </TableCell>
@@ -557,20 +647,17 @@ const ProductIntelligence = () => {
                         tickFormatter={(v) => `${(v / 1000000).toFixed(1)}M`}
                       />
                       <Legend wrapperStyle={{ fontSize: "11px", fontFamily: "'IBM Plex Mono', monospace" }} />
-                      {storesInHistory.map((storeName) => {
-                        const storeData = stores.find((s) => s.name === storeName);
-                        return (
-                          <Line
-                            key={storeName}
-                            type="monotone"
-                            dataKey={storeName}
-                            stroke={storeData?.color || "hsl(262, 52%, 47%)"}
-                            strokeWidth={1.5}
-                            dot={false}
-                            activeDot={{ r: 3, strokeWidth: 1 }}
-                          />
-                        );
-                      })}
+                      {cheapestFirst.map((row) => (
+                        <Line
+                          key={row.storeKey}
+                          type="monotone"
+                          dataKey={row.displayName}
+                          stroke={getStoreColor(row.storeKey)}
+                          strokeWidth={1.5}
+                          dot={false}
+                          activeDot={{ r: 3, strokeWidth: 1 }}
+                        />
+                      ))}
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -589,7 +676,7 @@ const ProductIntelligence = () => {
           </div>
         </section>
       </main>
-    </div>
+    </PageShell>
   );
 };
 
