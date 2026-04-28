@@ -125,10 +125,10 @@ const SignIn = () => {
             <p className="text-sm leading-relaxed text-[#4a4452]/70">
               No tiene cuenta? Contactese con{" "}
               <a
-                href="mailto:frandav1303@gmail.com"
+                href="mailto:fs@preciocompare.com"
                 className="font-semibold text-[#3f1476] transition-colors hover:text-[#016a68]"
               >
-                frandav1303@gmail.com
+                fs@preciocompare.com
               </a>{" "}
               para consultar precios
             </p>
