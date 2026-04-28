@@ -10,8 +10,10 @@ Public API:
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 import time
+import uuid
 from datetime import date
 from pathlib import Path
 from typing import Optional
@@ -26,15 +28,25 @@ from .models import PricingResult
 from .service import fetch_plans_for_product, search_pricing_stores
 
 
+def _slugify(value: str, max_len: int = 30) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", value.strip())[:max_len].strip("_")
+    return cleaned or "query"
+
+
 async def generate_pricing_excel(query: str) -> Optional[Path]:
     """Non-interactive pipeline used by the API: search → top-match per store →
     fetch all plans → write Excel. Returns the output path on success, or None
     when no pricing store returned any product. Raises FileNotFoundError when
-    the template is missing."""
+    the template is missing.
+
+    Each call writes to a per-request unique path so concurrent exports
+    cannot overwrite each other before their FileResponse drains."""
     if not TEMPLATE_PATH.exists():
         raise FileNotFoundError(f"Pricing template not found: {TEMPLATE_PATH}")
     template_path = str(TEMPLATE_PATH)
-    template_rows = read_template(template_path)
+    # openpyxl is sync I/O — keep it off the event loop so concurrent exports
+    # don't stall unrelated requests.
+    template_rows = await asyncio.to_thread(read_template, template_path)
 
     store_results = await search_pricing_stores(query)
 
@@ -55,17 +67,12 @@ async def generate_pricing_excel(query: str) -> Optional[Path]:
         pricing_results[result.store_name] = result
 
     EXCELS_DIR.mkdir(exist_ok=True)
-    base_name = f"pricing_{date.today().isoformat()}"
-    output_path = EXCELS_DIR / f"{base_name}.xlsx"
-    # Auto-increment suffix if file is locked (e.g. open in Excel locally).
-    suffix = 1
-    while True:
-        try:
-            write_results(template_path, output_path, template_rows, pricing_results)
-            break
-        except PermissionError:
-            suffix += 1
-            output_path = EXCELS_DIR / f"{base_name}_{suffix}.xlsx"
+    output_path = EXCELS_DIR / (
+        f"pricing_{date.today().isoformat()}_{_slugify(query)}_{uuid.uuid4().hex[:8]}.xlsx"
+    )
+    await asyncio.to_thread(
+        write_results, template_path, output_path, template_rows, pricing_results
+    )
 
     return output_path
 

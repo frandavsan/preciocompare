@@ -152,6 +152,11 @@ const ProductIntelligence = () => {
   const query = searchParams.get("q") || "";
   const fromCABA = searchParams.get("caba") === "1";
   const postalCode = searchParams.get("postal_code") ?? "";
+  // Landing canonicalizes CABA to "1425" before submitting; mirror that here so
+  // the React Query key (and the backend cache path) match across the
+  // Landing → ProductIntelligence navigation. Otherwise the second page
+  // re-runs the full multi-store search.
+  const effectivePostal = fromCABA ? "1425" : (postalCode || undefined);
 
   const selection = useMemo(
     () => parseSelectedSlots(searchParams.get("selected")),
@@ -161,7 +166,7 @@ const ProductIntelligence = () => {
 
   const { data, isLoading, error } = useSearch(query, {
     enabled: !!query,
-    postalCode: postalCode || undefined,
+    postalCode: effectivePostal,
   });
 
   const { signOut, token } = useAuth();

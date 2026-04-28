@@ -177,7 +177,9 @@ async def stores(request: Request, user: dict = Depends(require_auth)):
 @limiter.limit("5/minute")
 async def pricing_excel(
     request: Request,
-    q: str = Query(description="Product model name or SKU (e.g. 'Samsung S26', 'PS5')"),
+    # min_length=3 mirrors the CLI's pricing guard — anything shorter fans out
+    # to every store and plan-fetch path with no chance of a useful match.
+    q: str = Query(min_length=3, description="Product model name or SKU (e.g. 'Samsung S26', 'PS5')"),
     user: dict = Depends(require_auth),
 ):
     """Run the pricing pipeline and stream the filled Excel as a download."""

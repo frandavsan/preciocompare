@@ -5,7 +5,18 @@ import TopNav from "@/components/TopNav";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 
-type LocationState = { from?: { pathname?: string } } | null;
+type LocationState = {
+  from?: { pathname?: string; search?: string; hash?: string };
+} | null;
+
+// ProtectedRoute hands us the full Location object; reassemble pathname +
+// search + hash so deep links like /producto?q=...&selected=... survive a
+// re-auth round-trip instead of dropping the query string.
+const buildReturnPath = (state: LocationState): string => {
+  const from = state?.from;
+  if (!from?.pathname) return "/";
+  return `${from.pathname}${from.search ?? ""}${from.hash ?? ""}`;
+};
 
 const SignIn = () => {
   const { session, isLoading } = useAuth();
@@ -17,8 +28,7 @@ const SignIn = () => {
   const [error, setError] = useState<string | null>(null);
 
   if (!isLoading && session) {
-    const from = (location.state as LocationState)?.from?.pathname ?? "/";
-    return <Navigate to={from} replace />;
+    return <Navigate to={buildReturnPath(location.state as LocationState)} replace />;
   }
 
   const handleSubmit = async (e: FormEvent) => {
@@ -43,8 +53,7 @@ const SignIn = () => {
       return;
     }
 
-    const from = (location.state as LocationState)?.from?.pathname ?? "/";
-    navigate(from, { replace: true });
+    navigate(buildReturnPath(location.state as LocationState), { replace: true });
   };
 
   return (

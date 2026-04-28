@@ -28,13 +28,21 @@ async def _fetch_jwks(force: bool = False) -> list[dict]:
     if not force and cached is not None and now - _jwks_cache["fetched_at"] < _JWKS_TTL_SECONDS:
         return cached
     url = f"{settings.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-    keys = resp.json().get("keys", [])
-    _jwks_cache["keys"] = keys
-    _jwks_cache["fetched_at"] = now
-    return keys
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+        keys = resp.json().get("keys", [])
+        _jwks_cache["keys"] = keys
+        _jwks_cache["fetched_at"] = now
+        return keys
+    except (httpx.HTTPError, ValueError) as exc:
+        # Transient JWKS outage: serve still-valid cached keys so a brief
+        # Supabase/DNS hiccup doesn't 500 every protected endpoint. Without a
+        # cache (cold start), surface a clean 503 instead of an opaque 500.
+        if cached is not None:
+            return cached
+        raise HTTPException(503, "Auth provider unreachable") from exc
 
 
 def _find_jwk(keys: list[dict], kid: str) -> dict | None:
