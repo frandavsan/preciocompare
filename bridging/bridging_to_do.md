@@ -55,7 +55,7 @@ Authorization: Bearer {supabase_jwt}
 | `free_shipping` | `bool` | Based on Buenos Aires postal code |
 | `international` | `bool \| null` | `null` = concept doesn't apply to this store |
 | `available` | `bool` | In-stock status |
-| `image_url` | `str \| null` | `/images/{store_SKU}.jpg` — only Cetrogar (Magento); null for all others |
+| `image_url` | `str \| null` | Raw CDN URL from the store's search response (VTEX `items[].images[].imageUrl`, Megatone `image_link`, Magento `image_src`). Null when the store doesn't expose an image. Frontend resolves it as-is — no API base URL prefix. |
 
 **`InstallmentResponse` fields:**
 | Field | Type | Notes |
@@ -75,9 +75,13 @@ Authorization: Bearer {supabase_jwt}
 `Authorization: Bearer {token}` header. The backend validates this via
 `backend/electrodomestics_bot/auth.py`.
 
-**Static files:** Product images are served at `{API_BASE_URL}/images/{filename}`.
-Currently only Cetrogar (Magento) produces images. All other stores return
-`image_url: null`.
+**Static files:** Product images are now passed through as raw CDN URLs from
+each store's search response. Backend no longer downloads or proxies images —
+the `/images/` static mount remains for the (currently unused) on-disk image
+cache helper but is not part of the search response path. Stores that expose
+an image: VTEX (Castillo, Cetrogar, OnCity, Montes Hermanos) via
+`items[].images[].imageUrl`, Megatone via Doofinder's `image_link`. Fravega
+returns `image_url: null` (its GQL search response does not include images).
 
 **CORS:** Already configured on the backend. `allow_origins` is read from
 `settings.cors_origins` in `backend/electrodomestics_bot/config.py`. As of the
@@ -228,9 +232,12 @@ code).
 
 ---
 
-### 🔲 Item 4 — Product selection UX
+### ✅ Item 4 — Product selection UX
 
-**Status:** Hybrid UX already built in `Landing.tsx`. Needs wiring to real API.
+**Completed.** Both pages now run on real API data via `useSearch`; the
+Landing → ProductIntelligence URL contract uses `{store, url}[]` and
+ProductIntelligence reconciles it against the live response with
+`applySelection` (auto mode falls back to `autoSelectProducts`).
 
 **How it works (already implemented structurally):**
 
@@ -316,9 +323,15 @@ this richer format and stop stubbing the placeholder values.
 
 ---
 
-### 🔲 Item 5 — Data model transformation layer
+### ✅ Item 5 — Data model transformation layer
 
-**Status:** Pending Item 2 (auth) and Item 3 (API client); design is now settled.
+**Completed.** `frontend/src/lib/transforms.ts` exists with `formatPrice`,
+`bestSinInteresCount`, `formatBestPromo`, `searchToStoreGroups`,
+`autoSelectProducts`, `applySelection`, and `resolveImageUrl`. Both Landing
+and ProductIntelligence shape data exclusively through these helpers — no
+component touches `SearchResponse` directly. The shape diverges slightly from
+the original sketch below (`SelectedProduct` instead of `PerStoreProduct`, no
+`deriveMetrics` since the consumer that needed it was retired).
 
 **What:** `frontend/src/lib/transforms.ts` — all data shaping in one place.
 No component touches `SearchResponse` directly.
@@ -381,9 +394,13 @@ Example: `"12x sin interés · envío gratis"` or `"Stock disponible"`.
 
 ---
 
-### 🔲 Item 6 — React Query hooks
+### ✅ Item 6 — React Query hooks
 
-**Status:** Pending Items 2 and 3; design is now settled.
+**Completed.** `frontend/src/hooks/useSearch.ts` exists, dedupes by
+`["search", q, detail, postalCode]` with a 5 min staleTime, and is consumed
+by both Landing and ProductIntelligence. `useStores` was intentionally
+skipped — the doc flagged it as optional future use, and there is no store
+filter consumer today (would be dead code). Re-add when needed.
 
 **Hooks to create** (in `frontend/src/hooks/`):
 
@@ -448,39 +465,81 @@ during the transition. Delete once nothing imports from it.
 
 ---
 
-### 🔲 Item 8 — Image handling
+### ✅ Item 8 — Image handling
 
-**Status:** Pending Items 3 and 6.
+**Status:** Done.
 
-**Logic:**
-```
-if product.image_url → ${VITE_API_BASE_URL}${product.image_url}
-else               → generic electronics placeholder
-```
+**What was done:**
 
-Only Cetrogar returns a real `image_url`. All other stores get a placeholder.
-
-**Files to modify:**
-- `frontend/src/pages/ProductIntelligence.tsx` — hero image
-- `frontend/src/components/ComparisonTable.tsx` — table header image
+- Backend now passes raw CDN image URLs straight from each store's search
+  response — no proxying, no on-disk download. Implemented in the platform
+  layer so every current and future store on that platform inherits it:
+  - `platforms/vtex.py` → new `_extract_image()` reads
+    `items[].images[].imageUrl` (covers Castillo, Cetrogar, OnCity, Montes
+    Hermanos automatically).
+  - `platforms/megatone.py` → `_parse_product()` now reads `image_link` from
+    the Doofinder response.
+  - `platforms/magento.py` → already had `image_src`, unchanged.
+  - `platforms/fravega.py` → unchanged; Fravega's GQL search does not return
+    image URLs, so it stays `None` (the frontend fallback chain handles it).
+- `service.py` no longer downloads or rewrites images — the `download_image`
+  call and the per-result rewrite block were removed. `image_cache.py` and the
+  `/images/` static mount remain in place but are no longer hit by the search
+  path.
+- `models.py` docstrings updated to reflect that `image_url` is now a raw
+  external URL (no API base prefix needed).
+- `frontend/src/pages/ProductIntelligence.tsx` — hero image is now a
+  priority-sorted candidate chain with browser-side fallback:
+  - Priority order: Cetrogar → OnCity → Castillo → Montes Hermanos → Fravega
+    → Megatone (VTEX CDNs first, then everything else).
+  - Loading state: spinner overlay shown while the current candidate's
+    `<img>` is fetching; image fades in via `opacity` transition once
+    `onLoad` fires.
+  - Fallback chain: `onError` advances to the next candidate (`key={url}`
+    forces React to remount the `<img>` so the browser fetches the new src).
+  - When all candidates fail (or none exist), the existing "Sin imagen
+    disponible" placeholder is shown.
+  - Page renders with all data populated immediately; the image slot loads
+    independently in parallel — never blocks navigation or other UI.
+- `resolveImageUrl()` already handled both raw `http(s)://` URLs and
+  API-relative paths (`/images/...`), so no transform-layer change was
+  needed.
 
 ---
 
-### 🔲 Item 9 — "Solicitar análisis de medios de pago" button
+### ✅ Item 9 — "Solicitar análisis de medios de pago" button
 
-**Status:** Pending Items 3 and 6. No additional backend work needed.
+**Status:** Done — scope changed mid-implementation.
 
-**What:** The button currently fakes a 2-5s loading animation. The backend
-already supports `detail=true` mode, which fetches full card and bank names for
-each installment. Wire the button to a second real API call.
+**What was done (revised scope):** The original spec wired the button to
+`GET /search?q=&detail=true` and refreshed installment cells in-place. We
+pivoted to a different deliverable: the button now triggers the existing
+pricing-spreadsheet pipeline (separate from `/search`), generates the filled
+`.xlsx`, and downloads it directly in the browser.
 
-**Flow once wired:**
-1. Page loads → `GET /search?q=&detail=false` (fast, ~3-6s). Installments show
-   count + amount only (e.g. "12x").
-2. User clicks the button.
-3. Page calls `GET /search?q=&detail=true` (slower, ~6-12s). Real loading plays.
-4. Response arrives → installment cells update with full card names
-   (e.g. "12x sin interés — Visa, Mastercard, BNA").
+**Implementation:**
+- Backend: new `generate_pricing_excel(query)` non-interactive entry point in
+  `pricing/__init__.py`, plus `GET /pricing/excel?q=...` endpoint
+  (auth-gated, 5 req/min/IP) that returns the `.xlsx` as a `FileResponse`
+  with a proper `Content-Disposition` filename. The interactive CLI
+  `run_pricing()` workflow is unchanged.
+- Frontend: new `downloadPricingExcel(q, token)` helper in `lib/api.ts`
+  parses the filename header and returns `{ blob, filename }`.
+  `ProductIntelligence.tsx`'s click handler triggers a real fetch + browser
+  download via a transient `<a download>` anchor; the synthetic 2-5s timer,
+  fake `%` progress and three timer refs were removed.
+- Inline error chip next to the button (`role="alert"`, destructive color,
+  same typography as the loading row) localizes `ApiError` for this context:
+  `Sin coincidencias en las tiendas.` (404), `Demasiadas solicitudes (429).
+  Esperá un momento.`, `Sesión expirada.` (401, also triggers signOut),
+  `Sin conexión.` (network), `No se pudo generar el Excel.` (5xx / unknown).
+- The `detail=true` toggle on `/search` is still untouched; no consumer
+  needs it now that the table is populated by the fast call.
+
+**Not yet surfaced:** partial-store failures (e.g. one of the four pricing
+stores erroring while the others succeed) are written as `"-"` cells in the
+output — not communicated separately to the UI. Add later if needed via a
+custom response header.
 
 ---
 
@@ -538,33 +597,70 @@ postal code in an adjacent input is sent to the backend for shipping simulation.
 
 ---
 
-### 🔲 Item 12 — Loading and error states
+### ✅ Item 12 — Loading and error states
 
-**Status:** Pending Items 2, 3, 6.
+**Status:** Done — three tiers shipped.
 
-**What:** Loading animations are currently `setTimeout`-driven. With real API
-calls they must be driven by React Query's `isLoading`, `isFetching`, `isError`
-states. Per-store errors from `store_status` must render gracefully in the
-comparison table (not blank cells or crashes).
+**Tier 1 — deployment-blocker fixes:**
+- New `classifyError(err)` helper in `lib/api.ts` maps `ApiError`/network
+  faults to `{ kind, title, body }` for `auth | rate_limit | server |
+  network | unknown`.
+- `Landing.tsx` and `ProductIntelligence.tsx` consume the helper for inline
+  copy; a side-effect `useEffect` triggers `signOut()` on 401 (AuthContext
+  clears session, ProtectedRoute routes to `/signin`) and surfaces a sonner
+  toast for 429/network.
+- Per-store coverage gaps are now visible in the comparison table:
+  `unavailableStoreRows` adds muted rows for stores the user *intended* to
+  compare that errored, timed out, or returned no products.
+- Top-level `ErrorBoundary` (new `components/ErrorBoundary.tsx`) wraps the
+  router; render exceptions show a recovery panel with a "Volver al inicio"
+  button instead of blanking the screen.
 
-**Work needed:**
-- Wire `Landing.tsx` loading to actual query state
-- Handle per-store `status: "error"` / `status: "timeout"` in the table
-- Global toast or error boundary for network-level failures (401, 503)
+**Tier 2 — quality:**
+- React Query retry policy in `useSearch.ts`: one retry on 5xx and network
+  faults with exponential backoff (`min(1000 * 2^attempt, 4000)`); never on
+  4xx so auth/rate-limit/bad-query surface immediately.
+- Dropped the duplicate shadcn toast system — `<Toaster />` mount removed
+  from `App.tsx` and `hooks/use-toast.ts`, `components/ui/toast.tsx`,
+  `components/ui/toaster.tsx`, `components/ui/use-toast.ts` deleted. Sonner
+  is the single toast library.
+- Replaced Landing's synthetic 9-second progress ramp with a real
+  elapsed-seconds counter (`{N}s`) + indeterminate `animate-pulse` bar.
+  Removed `loadingProgress` state, `completionRef`, the ramp/completion
+  timeouts and the 350ms post-fill delay (no bar to fill anymore).
+
+**Tier 3 — nice-to-haves:**
+- `ConnectionBanner` in `App.tsx` — fixed-position destructive banner driven
+  by `navigator.onLine` + `online`/`offline` events. Cheap pre-click
+  feedback for hard offline; the post-fetch network toast still catches
+  captive-portal cases.
+- `StatusDot` (green/gray/red) inserted into every comparison row's "Tienda"
+  cell, plus a count summary above the table (`X consultadas · Y con
+  resultados · Z sin respuesta · W sin coincidencias`, errored/empty parts
+  hidden when zero).
 
 ---
 
-### 🔲 Item 13 — Rate limiting awareness
+### ✅ Item 13 — Rate limiting awareness
 
-**Status:** Pending Items 3 and 6.
+**Status:** Done.
 
-**What:** Backend enforces 10 req/min on `/search`, 20 req/min on `/stores`.
+**Backend:**
+- `api.py` 429 handler now sets `Retry-After: 60` (both rate-limited
+  endpoints use 1-minute windows; 60s is the safe upper bound) and includes
+  `retry_after` in the JSON body for proxies that strip custom headers.
 
-**Work needed:**
-- `useSearch` must only fire on explicit submit (not on keystroke) using React
-  Query's `enabled` flag
-- Handle 429 responses with a user-facing toast: "Demasiadas búsquedas, esperá
-  un momento"
+**Frontend:**
+- `ApiError` carries optional `retryAfterSeconds`; `apiFetch` parses the
+  header on 429 with the JSON body as fallback.
+- `Landing.tsx` tracks a cooldown deadline in state — when 429 fires, sets
+  `cooldownEndsAt = now + retryAfterSeconds * 1000`, ticks `cooldownSec`
+  every 250 ms, disables the submit button while active, and renders
+  `Esperá Ns` on the button label. `handleSubmit` early-returns while the
+  cooldown is non-zero.
+
+The submit-on-explicit-action requirement was already covered in Tier 2 of
+Item 12 via the `submitToken > 0` gate and the React Query `enabled` flag.
 
 ---
 
@@ -585,22 +681,21 @@ comparison table (not blank cells or crashes).
 ✅  1  Env config + Vite proxy + gitignores
 ✅  2  Auth bridge (Supabase client, AuthContext, ProtectedRoute, SignIn wiring)
 ✅  3  Typed API client (api.ts)
+✅  4  Landing + ProductIntelligence wired to real API; {store,url}[] URL contract
+✅  5  Data model transformation (transforms.ts)
+✅  6  React Query hooks (useSearch — useStores skipped as no consumer)
 ✅  7  Store metadata constants (stores.ts)
 ✅ 11  Postal code support (CABA default or user-provided CP)
-─── unblocked (Q2 resolved, UX already built in Landing) ───
-🔲  4  Wire Landing search to real API + fix selected URL param format
-🔲  5  Data model transformation (transforms.ts)
-🔲  6  React Query hooks (useSearch, useStores)
-        → also wire ProductIntelligence to read selected param + useSearch
-🔲  8  Image handling
-🔲 12  Loading/error states
-🔲 13  Rate limiting handling
-🔲  9  Payment analysis button wiring
+✅  8  Image handling (raw CDN URLs + frontend priority+fallback chain)
+✅ 12  Loading/error states
+✅ 13  Rate limiting handling
+✅  9  Payment analysis button wiring
 ─── optional / phased ───
-❓ 10  Price history tracking (decision pending)
+❓ 10  Price history tracking (decision pending — chart currently rendered
+       inline in ProductIntelligence with blur+grayscale to indicate "unavailable")
 ```
 
-Items 2, 3, 7, 11 are complete. Items 4, 5, 6 are unblocked (Q2 resolved).
+Items 1–8 and 11 are complete. Items 9, 12, 13 remain; item 10 is awaiting the Q3 decision.
 
 ---
 
@@ -702,11 +797,11 @@ flagging as a standalone minor cleanup if N1 gets deferred further.
 |---|---|---|
 | `bridging_to_do.md` | (stays here) | ✅ This document |
 | `api.ts` | `frontend/src/lib/api.ts` | ✅ Created in place |
-| `transforms.ts` | `frontend/src/lib/transforms.ts` | 🔲 Pending |
+| `transforms.ts` | `frontend/src/lib/transforms.ts` | ✅ Created in place |
 | `stores.ts` | `frontend/src/lib/stores.ts` | ✅ Created in place |
 | `supabase.ts` | `frontend/src/lib/supabase.ts` | ✅ Created in place |
 | `AuthContext.tsx` | `frontend/src/contexts/AuthContext.tsx` | ✅ Created in place |
 | `ProtectedRoute.tsx` | `frontend/src/components/ProtectedRoute.tsx` | ✅ Created in place |
-| `useSearch.ts` | `frontend/src/hooks/useSearch.ts` | 🔲 Pending |
-| `useStores.ts` | `frontend/src/hooks/useStores.ts` | 🔲 Pending |
+| `useSearch.ts` | `frontend/src/hooks/useSearch.ts` | ✅ Created in place |
+| `useStores.ts` | `frontend/src/hooks/useStores.ts` | ⏭️ Skipped — no consumer today |
 | `usePriceHistory.ts` | `frontend/src/hooks/usePriceHistory.ts` | ❓ Pending Q3 decision |

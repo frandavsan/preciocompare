@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { searchProducts, type SearchResponse } from "@/lib/api";
+import { ApiError, searchProducts, type SearchResponse } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 
 interface UseSearchOptions {
@@ -26,6 +26,14 @@ export function useSearch(
       searchProducts(trimmed, detail, token as string, { signal }, postalCode),
     enabled: Boolean(enabled && trimmed && token),
     staleTime: 5 * 60 * 1000,
-    retry: false,
+    // One retry on transport faults (5xx, network); never on 4xx — the user
+    // needs to fix something (auth, rate limit, bad query) and silent retries
+    // would just delay surfacing the error.
+    retry: (failureCount, error) => {
+      if (failureCount >= 1) return false;
+      if (error instanceof ApiError) return error.status >= 500;
+      return true;
+    },
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 4000),
   });
 }

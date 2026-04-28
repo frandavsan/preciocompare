@@ -169,6 +169,7 @@ class MegatoneAdapter(StoreAdapter):
             available=p.get("availability", "").lower() == "in stock",
             free_shipping=p.get("free_shipping") == "true",
             international=p.get("productointernacional") == "true",
+            image_url=p.get("image_link"),
         )
 
     @staticmethod

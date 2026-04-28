@@ -83,9 +83,20 @@ class VtexAdapter(StoreAdapter):
                 free_shipping=shipping_map.get(i, False),
                 international=self._is_international(p),
                 available=self._is_available(p),
+                image_url=self._extract_image(p),
             ))
 
         return results
+
+    @staticmethod
+    def _extract_image(product: dict) -> Optional[str]:
+        """First CDN image URL across items[].images[]. Returned raw — frontend resolves it."""
+        for item in product.get("items", []):
+            for img in item.get("images", []):
+                url = img.get("imageUrl")
+                if url:
+                    return url
+        return None
 
     async def _fetch_all_products(self, quoted_query: str) -> list[dict]:
         """Fetches all pages of VTEX product search results (capped at 10 pages / 500 results).

@@ -10,7 +10,6 @@ from typing import Optional
 from . import cache
 from .adapters import ADAPTERS
 from .core import search_all_stores
-from .image_cache import download_image
 from dataclasses import replace
 
 from ..models import ProductResult, StoreSearchResult
@@ -111,24 +110,6 @@ async def search_products(
                     )
                     ssr = live.get(adapter.name, StoreSearchResult())
                     live_results = ssr.products
-
-                    # Download one representative product image (Magento stores only).
-                    # CDN URLs start with "http"; convert the first to an API-relative path.
-                    # Only attempt ONE download — if it fails, skip the rest to avoid
-                    # N serial timeouts when the CDN is unreachable.
-                    updated = []
-                    image_attempted = False
-                    image_path = None
-                    for r in live_results:
-                        if r.image_url and r.image_url.startswith("http"):
-                            if not image_attempted:
-                                image_attempted = True
-                                image_path = await download_image(adapter.name, r.sku, r.image_url)
-                                r = replace(r, image_url=image_path)
-                            else:
-                                r = replace(r, image_url=None)
-                        updated.append(r)
-                    live_results = updated
 
                     found = _anomaly.check(query, {adapter.name: live_results})
                     if found:

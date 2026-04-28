@@ -3,6 +3,7 @@ import { useSearchParams, Link } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Check, X } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { BarChart, Bar, Cell } from "recharts";
+import { toast } from "sonner";
 import {
   Select,
   SelectContent,
@@ -21,7 +22,9 @@ import {
   formatPrice,
   resolveImageUrl,
 } from "@/lib/transforms";
-import { getStoreColor } from "@/lib/stores";
+import { getStoreColor, getStoreDisplayName } from "@/lib/stores";
+import { ApiError, classifyError, downloadPricingExcel, type StoreStatus } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 
 type SelectedSlot = { store: string; url: string };
 
@@ -50,7 +53,50 @@ function parseSelectedSlots(value: string | null): SelectedSlot[] {
   }
 }
 
+const formatDecimal = (value: number, digits = 1) =>
+  new Intl.NumberFormat("es-AR", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+
+// Inline label for the pricing-excel button. classifyError handles the generic
+// transport cases; we override only the kinds where the user benefits from
+// pricing-specific wording (404 = no matches in pricing stores; 503 = the
+// generation pipeline failed) and tag 429 with its status code per the spec.
+const messageForExcelError = (err: unknown): string => {
+  if (err instanceof ApiError) {
+    if (err.status === 404) return "Sin coincidencias en las tiendas.";
+    if (err.status === 429) return "Demasiadas solicitudes (429). Esperá un momento.";
+    if (err.status === 401) return "Sesión expirada.";
+    if (err.status >= 500) return "No se pudo generar el Excel.";
+  }
+  const c = classifyError(err);
+  if (c.kind === "network") return "Sin conexión.";
+  return "No se pudo generar el Excel.";
+};
+
 const HISTORY_MONTHS = ["Sep", "Oct", "Nov", "Dic", "Ene", "Feb", "Mar"];
+
+// Hero image fallback order — VTEX CDNs (cetrogar/oncity/castillo) are the most
+// reliable, followed by Montes Hermanos (also VTEX), then Fravega (often null),
+// then Megatone (Doofinder thumbnails). Stores not listed are appended in the
+// order they appear in `perStoreProducts`.
+const STORE_IMAGE_PRIORITY = ["cetrogar", "oncity", "castillo", "monteshermanos", "fravega", "megatone"];
+
+type StoreRowState = "ok" | "empty" | "errored";
+
+const StatusDot = ({ state }: { state: StoreRowState }) => {
+  const color =
+    state === "errored" ? "bg-destructive"
+    : state === "empty" ? "bg-muted-foreground/40"
+    : "bg-secondary";
+  return (
+    <span
+      className={`inline-block h-1.5 w-1.5 rounded-full ${color}`}
+      aria-hidden="true"
+    />
+  );
+};
 
 const PageShell = ({ children }: { children: React.ReactNode }) => (
   <div className="relative min-h-screen overflow-x-hidden bg-background paper-texture isolate">
@@ -118,26 +164,23 @@ const ProductIntelligence = () => {
     postalCode: postalCode || undefined,
   });
 
+  const { signOut, token } = useAuth();
+  const handledErrorRef = useRef<unknown>(null);
+  useEffect(() => {
+    if (!error || error === handledErrorRef.current) return;
+    handledErrorRef.current = error;
+    const classified = classifyError(error);
+    if (classified.kind === "auth") {
+      toast.error(classified.title, { description: classified.body });
+      void signOut();
+    } else if (classified.kind === "rate_limit" || classified.kind === "network") {
+      toast.error(classified.title, { description: classified.body });
+    }
+  }, [error, signOut]);
+
   const [priceOrder, setPriceOrder] = useState<"asc" | "desc" | "promo">("asc");
   const [isPaymentAnalysisLoading, setIsPaymentAnalysisLoading] = useState(false);
-  const [paymentAnalysisProgress, setPaymentAnalysisProgress] = useState(0);
-  const paymentAnalysisTimeoutRef = useRef<number | null>(null);
-  const paymentAnalysisIntervalRef = useRef<number | null>(null);
-  const paymentAnalysisFinishRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (paymentAnalysisTimeoutRef.current !== null) {
-        window.clearTimeout(paymentAnalysisTimeoutRef.current);
-      }
-      if (paymentAnalysisIntervalRef.current !== null) {
-        window.clearInterval(paymentAnalysisIntervalRef.current);
-      }
-      if (paymentAnalysisFinishRef.current !== null) {
-        window.clearTimeout(paymentAnalysisFinishRef.current);
-      }
-    };
-  }, []);
+  const [paymentAnalysisError, setPaymentAnalysisError] = useState<string | null>(null);
 
   const perStoreProducts = useMemo(() => {
     if (!data) return [];
@@ -162,13 +205,81 @@ const ProductIntelligence = () => {
     [perStoreProducts],
   );
 
-  const heroImage = useMemo(() => {
-    for (const { product } of perStoreProducts) {
-      const resolved = resolveImageUrl(product.image_url);
-      if (resolved) return resolved;
+  // Stores the user wanted to compare but that didn't produce a row — either
+  // because the fetch failed (errored/timed out) or because the response had
+  // no usable products. Surfaced as muted rows + colored chip so coverage
+  // gaps are visible rather than silently dropping a column from the user's
+  // mental tally.
+  type UnavailableRow = {
+    storeKey: string;
+    displayName: string;
+    state: Exclude<StoreRowState, "ok">;
+    status: StoreStatus;
+  };
+  const intendedStoreKeys = useMemo(() => {
+    if (!data) return new Set<string>();
+    return isSelectiveComparison
+      ? new Set(selection.map((s) => s.store))
+      : new Set(Object.keys(data.store_status));
+  }, [data, isSelectiveComparison, selection]);
+
+  const unavailableStoreRows: UnavailableRow[] = useMemo(() => {
+    if (!data) return [];
+    const shownKeys = new Set(comparisonRows.map((r) => r.storeKey));
+    const out: UnavailableRow[] = [];
+    for (const key of intendedStoreKeys) {
+      if (shownKeys.has(key)) continue;
+      const info = data.store_status[key];
+      if (!info) continue;
+      out.push({
+        storeKey: key,
+        displayName: getStoreDisplayName(key),
+        state: info.status === "ok" ? "empty" : "errored",
+        status: info.status,
+      });
     }
-    return null;
+    return out;
+  }, [data, intendedStoreKeys, comparisonRows]);
+
+  const storeCounts = useMemo(() => {
+    const errored = unavailableStoreRows.filter((r) => r.state === "errored").length;
+    const empty = unavailableStoreRows.filter((r) => r.state === "empty").length;
+    return {
+      attempted: intendedStoreKeys.size,
+      withResults: comparisonRows.length,
+      errored,
+      empty,
+    };
+  }, [intendedStoreKeys, comparisonRows, unavailableStoreRows]);
+
+  const heroImageCandidates = useMemo(() => {
+    const byStore = new Map<string, string>();
+    for (const { storeKey, product } of perStoreProducts) {
+      const resolved = resolveImageUrl(product.image_url);
+      if (resolved && !byStore.has(storeKey)) byStore.set(storeKey, resolved);
+    }
+    const ordered: string[] = [];
+    for (const key of STORE_IMAGE_PRIORITY) {
+      const url = byStore.get(key);
+      if (url) ordered.push(url);
+    }
+    for (const [key, url] of byStore) {
+      if (!STORE_IMAGE_PRIORITY.includes(key)) ordered.push(url);
+    }
+    return ordered;
   }, [perStoreProducts]);
+
+  const heroCandidatesKey = heroImageCandidates.join("|");
+  const [imageIdx, setImageIdx] = useState(0);
+  const [imageLoaded, setImageLoaded] = useState(false);
+
+  useEffect(() => {
+    setImageIdx(0);
+    setImageLoaded(false);
+  }, [heroCandidatesKey]);
+
+  const currentHeroImage =
+    imageIdx < heroImageCandidates.length ? heroImageCandidates[imageIdx] : null;
 
   const cheapestFirst = useMemo(
     () => [...comparisonRows].sort((a, b) => a.price - b.price),
@@ -192,12 +303,12 @@ const ProductIntelligence = () => {
     : 0;
   const storesFound = comparisonRows.length;
 
-  const cheapVsAvg = avgPrice ? (((minPrice - avgPrice) / avgPrice) * 100).toFixed(1) : "0.0";
-  const expVsAvg = avgPrice ? (((maxPrice - avgPrice) / avgPrice) * 100).toFixed(1) : "0.0";
-  const minVsMax = maxPrice ? (((minPrice - maxPrice) / maxPrice) * 100).toFixed(1) : "0.0";
+  const cheapVsAvg = avgPrice ? ((minPrice - avgPrice) / avgPrice) * 100 : 0;
+  const expVsAvg = avgPrice ? ((maxPrice - avgPrice) / avgPrice) * 100 : 0;
+  const minVsMax = maxPrice ? ((minPrice - maxPrice) / maxPrice) * 100 : 0;
   const avgToCheapestGap = avgPrice
-    ? `- ${(((avgPrice - minPrice) / avgPrice) * 100).toFixed(1)}%`
-    : "0.0%";
+    ? `- ${formatDecimal(((avgPrice - minPrice) / avgPrice) * 100)}%`
+    : "0,0%";
 
   const lineData = useMemo(() => {
     return HISTORY_MONTHS.map((date) => {
@@ -216,53 +327,48 @@ const ProductIntelligence = () => {
     isBest: row.price === minPrice,
   }));
 
-  const displayProductName = query || "Productos seleccionados";
+  // Pick the shortest name from the products actually being compared, but skip
+  // it when it barely differs from the query in length (< 5 chars) — that
+  // usually means the store echoed the query verbatim and the next-shortest
+  // name carries the actual product detail (model code, capacity, etc.).
+  const displayProductName = useMemo(() => {
+    const names = perStoreProducts
+      .map((p) => p.product.name)
+      .filter((n): n is string => Boolean(n))
+      .sort((a, b) => a.length - b.length);
+    if (names.length === 0) return query || "Productos seleccionados";
+    const queryLen = query.trim().length;
+    const shortest = names[0];
+    if (names.length > 1 && Math.abs(shortest.length - queryLen) < 5) {
+      return names[1];
+    }
+    return shortest;
+  }, [perStoreProducts, query]);
   const displayCategory = isSelectiveComparison ? "Seleccion manual" : "Seleccion automatica";
 
-  const handlePaymentAnalysisRequest = () => {
-    if (isPaymentAnalysisLoading) return;
-
-    if (paymentAnalysisTimeoutRef.current !== null) {
-      window.clearTimeout(paymentAnalysisTimeoutRef.current);
-    }
-    if (paymentAnalysisIntervalRef.current !== null) {
-      window.clearInterval(paymentAnalysisIntervalRef.current);
-    }
-    if (paymentAnalysisFinishRef.current !== null) {
-      window.clearTimeout(paymentAnalysisFinishRef.current);
-    }
-
+  const handlePaymentAnalysisRequest = async () => {
+    if (isPaymentAnalysisLoading || !token || !query) return;
     setIsPaymentAnalysisLoading(true);
-    setPaymentAnalysisProgress(0);
-
-    const loadingMs = Math.floor(Math.random() * 3000) + 2000;
-    const startedAt = Date.now();
-
-    paymentAnalysisIntervalRef.current = window.setInterval(() => {
-      const elapsed = Date.now() - startedAt;
-      const ratio = Math.min(elapsed / loadingMs, 1);
-
-      setPaymentAnalysisProgress((prev) => {
-        const baseTarget = Math.floor(ratio * 100);
-        const jumpSize = Math.floor(Math.random() * 9) + 3;
-        const randomLead = Math.floor(Math.random() * 7);
-        return Math.min(99, Math.max(prev, baseTarget + randomLead, prev + jumpSize));
-      });
-    }, 150);
-
-    paymentAnalysisTimeoutRef.current = window.setTimeout(() => {
-      if (paymentAnalysisIntervalRef.current !== null) {
-        window.clearInterval(paymentAnalysisIntervalRef.current);
-        paymentAnalysisIntervalRef.current = null;
-      }
-
-      setPaymentAnalysisProgress(100);
-      paymentAnalysisFinishRef.current = window.setTimeout(() => {
-        setIsPaymentAnalysisLoading(false);
-        setPaymentAnalysisProgress(0);
-        paymentAnalysisFinishRef.current = null;
-      }, 500);
-    }, loadingMs);
+    setPaymentAnalysisError(null);
+    try {
+      const { blob, filename } = await downloadPricingExcel(query, token);
+      // Trigger a browser download via a transient anchor — no library needed.
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setPaymentAnalysisError(messageForExcelError(err));
+      // 401 still has to clear the session — show the inline message and let
+      // AuthContext route to /signin via the next render cycle.
+      if (err instanceof ApiError && err.status === 401) void signOut();
+    } finally {
+      setIsPaymentAnalysisLoading(false);
+    }
   };
 
   if (!query) {
@@ -291,12 +397,13 @@ const ProductIntelligence = () => {
   }
 
   if (error) {
+    const classified = classifyError(error);
     return (
       <PageShell>
         <StatusPanel
           eyebrow="Inteligencia de producto"
-          title="No se pudo cargar la busqueda"
-          description="Reintenta en unos segundos o ajusta la consulta."
+          title={classified.title}
+          description={classified.body}
         />
       </PageShell>
     );
@@ -346,13 +453,26 @@ const ProductIntelligence = () => {
                 <div className="relative mx-0 w-full max-w-[320px] aspect-square flex items-center justify-center">
                   <div className="absolute inset-1 rounded-[2.35rem] bg-card/90 soft-elevation" />
                   <div className="absolute inset-0 rounded-[2.5rem] border border-border/60 bg-gradient-to-br from-card/90 via-card/55 to-primary/5" />
-                  {heroImage ? (
-                    <img
-                      src={heroImage}
-                      alt={displayProductName}
-                      className="relative h-full w-full rounded-[2.25rem] object-contain p-6 drop-shadow-[0_18px_24px_hsl(220_20%_14%_/_0.15)]"
-                      loading="eager"
-                    />
+                  {currentHeroImage ? (
+                    <>
+                      {!imageLoaded && (
+                        <span className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+                          <span className="h-6 w-6 animate-spin rounded-full border-[1.5px] border-border border-t-primary" />
+                        </span>
+                      )}
+                      <img
+                        key={currentHeroImage}
+                        src={currentHeroImage}
+                        alt={displayProductName}
+                        className={`relative h-full w-full rounded-[2.25rem] object-contain p-6 drop-shadow-[0_18px_24px_hsl(220_20%_14%_/_0.15)] transition-opacity duration-200 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
+                        loading="eager"
+                        onLoad={() => setImageLoaded(true)}
+                        onError={() => {
+                          setImageLoaded(false);
+                          setImageIdx((i) => i + 1);
+                        }}
+                      />
+                    </>
                   ) : (
                     <div className="relative flex h-full w-full items-center justify-center rounded-[2.25rem] p-6">
                       <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground text-center">
@@ -427,10 +547,18 @@ const ProductIntelligence = () => {
               {isPaymentAnalysisLoading && (
                 <div className="inline-flex items-center gap-2 text-muted-foreground">
                   <span className="h-4 w-4 animate-spin rounded-full border-[1.5px] border-border border-t-primary" />
-                  <span className="font-mono text-[11px] tracking-[0.08em] tabular-nums">
-                    {paymentAnalysisProgress}%
+                  <span className="font-mono text-[11px] tracking-[0.08em]">
+                    Generando
                   </span>
                 </div>
+              )}
+              {!isPaymentAnalysisLoading && paymentAnalysisError && (
+                <span
+                  role="alert"
+                  className="font-mono text-[11px] leading-tight tracking-[0.08em] text-destructive"
+                >
+                  {paymentAnalysisError}
+                </span>
               )}
             </div>
             <section className="structured-card soft-elevation p-5 transform-gpu transition-[transform,box-shadow,background-color] duration-200 ease-out hover:-translate-y-0.5 hover:scale-[1.025] hover:bg-card">
@@ -441,18 +569,18 @@ const ProductIntelligence = () => {
                   { label: "Precio promedio", value: formatPrice(avgPrice) },
                   {
                     label: "Mas bajo vs promedio",
-                    value: `- ${Math.abs(Number(cheapVsAvg)).toFixed(1)}%`,
+                    value: `- ${formatDecimal(Math.abs(cheapVsAvg))}%`,
                     detail: `(${formatPrice(avgPrice - minPrice)})`,
                     accent: true,
                   },
                   {
                     label: "Mas alto vs promedio",
-                    value: `+ ${Math.abs(Number(expVsAvg)).toFixed(1)}%`,
+                    value: `+ ${formatDecimal(Math.abs(expVsAvg))}%`,
                     detail: `(${formatPrice(maxPrice - avgPrice)})`,
                   },
                   {
                     label: "Brecha min-max",
-                    value: `- ${Math.abs(Number(minVsMax)).toFixed(1)}%`,
+                    value: `- ${formatDecimal(Math.abs(minVsMax))}%`,
                     detail: `(${formatPrice(maxPrice - minPrice)})`,
                     accent: true,
                   },
@@ -481,7 +609,11 @@ const ProductIntelligence = () => {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
             <div className="flex items-baseline gap-3 flex-wrap">
               <h2 className="text-xl font-bold text-foreground">Comparacion por tienda</h2>
-              <span className="font-mono text-xs text-muted-foreground">- {storesFound} tiendas</span>
+              <span className="font-mono text-xs text-muted-foreground">
+                {storeCounts.attempted} consultadas · {storeCounts.withResults} con resultados
+                {storeCounts.errored > 0 && ` · ${storeCounts.errored} sin respuesta`}
+                {storeCounts.empty > 0 && ` · ${storeCounts.empty} sin coincidencias`}
+              </span>
             </div>
             <div className="flex items-center gap-3 self-start sm:self-auto">
               <span className="editorial-label whitespace-nowrap">Ordenar</span>
@@ -514,11 +646,16 @@ const ProductIntelligence = () => {
               </TableHeader>
               <TableBody>
                 {sortedRows.map((row) => {
-                  const diff = avgPrice ? (((row.price - avgPrice) / avgPrice) * 100).toFixed(1) : "0.0";
-                  const diffVsMax = maxPrice ? (((row.price - maxPrice) / maxPrice) * 100).toFixed(1) : "0.0";
+                  const diff = avgPrice ? ((row.price - avgPrice) / avgPrice) * 100 : 0;
+                  const diffVsMax = maxPrice ? ((row.price - maxPrice) / maxPrice) * 100 : 0;
                   return (
                     <TableRow key={`${row.storeKey}-${row.url}`} className={`border-border hover:bg-accent/40 ${row.price === minPrice ? "bg-accent/30" : ""}`}>
-                      <TableCell className="text-sm font-medium">{row.displayName}</TableCell>
+                      <TableCell className="text-sm font-medium">
+                        <span className="inline-flex items-center gap-2">
+                          <StatusDot state="ok" />
+                          {row.displayName}
+                        </span>
+                      </TableCell>
                       <TableCell className="max-w-[280px] text-sm text-foreground">
                         <span className="line-clamp-2">{row.productName}</span>
                       </TableCell>
@@ -533,15 +670,15 @@ const ProductIntelligence = () => {
                         )}
                       </TableCell>
                       <TableCell>
-                        <span className={`font-mono text-xs ${Number(diff) <= 0 ? "text-secondary" : "text-muted-foreground"}`}>
-                          {Number(diff) > 0 ? "+" : ""}
-                          {diff}%
+                        <span className={`font-mono text-xs ${diff <= 0 ? "text-secondary" : "text-muted-foreground"}`}>
+                          {diff > 0 ? "+" : ""}
+                          {formatDecimal(diff)}%
                         </span>
                       </TableCell>
                       <TableCell>
-                        <span className={`font-mono text-xs ${Number(diffVsMax) <= 0 ? "text-secondary" : "text-muted-foreground"}`}>
-                          {Number(diffVsMax) > 0 ? "+" : ""}
-                          {diffVsMax}%
+                        <span className={`font-mono text-xs ${diffVsMax < 0 ? "text-secondary" : "text-muted-foreground"}`}>
+                          {diffVsMax > 0 ? "+" : ""}
+                          {formatDecimal(diffVsMax)}%
                         </span>
                       </TableCell>
                       <TableCell>
@@ -571,6 +708,27 @@ const ProductIntelligence = () => {
                     </TableRow>
                   );
                 })}
+                {unavailableStoreRows.map((row) => (
+                  <TableRow
+                    key={`unavailable-${row.storeKey}`}
+                    className="border-border opacity-60 hover:bg-transparent"
+                  >
+                    <TableCell className="text-sm font-medium text-muted-foreground">
+                      <span className="inline-flex items-center gap-2">
+                        <StatusDot state={row.state} />
+                        {row.displayName}
+                      </span>
+                    </TableCell>
+                    <TableCell colSpan={7} className="text-sm italic text-muted-foreground">
+                      {row.state === "empty"
+                        ? "Sin resultados en esta tienda."
+                        : row.status === "timeout"
+                          ? "La tienda no respondio a tiempo."
+                          : "No se pudo conectar con la tienda."}
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground">—</TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           </div>
@@ -600,7 +758,7 @@ const ProductIntelligence = () => {
                       tick={{ fill: "hsl(220, 10%, 46%)", fontSize: 10, fontFamily: "'IBM Plex Mono', monospace" }}
                       axisLine={{ stroke: "hsl(220, 12%, 82%)" }}
                       tickLine={false}
-                      tickFormatter={(v) => `${(v / 1000000).toFixed(1)}M`}
+                      tickFormatter={(v) => `${formatDecimal(v / 1000000)}M`}
                     />
                     <Tooltip
                       contentStyle={{
@@ -644,7 +802,7 @@ const ProductIntelligence = () => {
                         tick={{ fill: "hsl(220, 10%, 46%)", fontSize: 10, fontFamily: "'IBM Plex Mono', monospace" }}
                         axisLine={{ stroke: "hsl(220, 12%, 82%)" }}
                         tickLine={false}
-                        tickFormatter={(v) => `${(v / 1000000).toFixed(1)}M`}
+                        tickFormatter={(v) => `${formatDecimal(v / 1000000)}M`}
                       />
                       <Legend wrapperStyle={{ fontSize: "11px", fontFamily: "'IBM Plex Mono', monospace" }} />
                       {cheapestFirst.map((row) => (

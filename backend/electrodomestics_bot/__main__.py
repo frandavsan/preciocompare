@@ -1,5 +1,4 @@
 import asyncio
-import itertools
 import logging
 import sys
 import time
@@ -7,7 +6,6 @@ import time
 from .processing.display import print_comparison, print_results
 from .processing.matching import dedup_results, group_results
 from .fetching.service import search_products
-from .fetching.image_cache import images_dir as _images_dir
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s — %(message)s")
 
@@ -67,13 +65,6 @@ def main() -> None:
         print(f"  Completed in {elapsed:.1f}s\n")
 
         stores_with_results = [name for name, ssr in all_results.items() if ssr.products]
-
-        all_products = itertools.chain.from_iterable(ssr.products for ssr in all_results.values())
-        image_product = next((p for p in all_products if p.image_url and p.image_url.startswith("/images/")), None)
-        if image_product:
-            filename = image_product.image_url[len("/images/"):]
-            file_url = "file:///" + str(_images_dir / filename).replace("\\", "/")
-            print(f"  \033]8;;{file_url}\033\\Product image fetched\033]8;;\033\\")
 
         if stores_with_results:
             options = " / ".join(stores_with_results) + " / all / n"

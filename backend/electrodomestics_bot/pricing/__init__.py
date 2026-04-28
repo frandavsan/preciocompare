@@ -3,7 +3,8 @@ Pricing spreadsheet automation — fetches ALL payment plans (sin + con interes)
 from competitor stores and writes interest rates to an Excel template.
 
 Public API:
-    run_pricing()  — interactive CLI workflow
+    run_pricing()             — interactive CLI workflow
+    generate_pricing_excel()  — non-interactive pipeline used by the API
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import sys
 import time
 from datetime import date
 from pathlib import Path
+from typing import Optional
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 TEMPLATE_PATH = _PROJECT_ROOT / "Precios E-commerce El Gato (1).xlsx"
@@ -22,6 +24,50 @@ from .adapters import PRICING_STORES
 from .excel_io import read_template, write_results
 from .models import PricingResult
 from .service import fetch_plans_for_product, search_pricing_stores
+
+
+async def generate_pricing_excel(query: str) -> Optional[Path]:
+    """Non-interactive pipeline used by the API: search → top-match per store →
+    fetch all plans → write Excel. Returns the output path on success, or None
+    when no pricing store returned any product. Raises FileNotFoundError when
+    the template is missing."""
+    if not TEMPLATE_PATH.exists():
+        raise FileNotFoundError(f"Pricing template not found: {TEMPLATE_PATH}")
+    template_path = str(TEMPLATE_PATH)
+    template_rows = read_template(template_path)
+
+    store_results = await search_pricing_stores(query)
+
+    confirmed: dict[str, tuple] = {}
+    for name, (store, products) in store_results.items():
+        if products:
+            confirmed[name] = (store, products[0])
+
+    if not confirmed:
+        return None
+
+    tasks = [
+        fetch_plans_for_product(store, product)
+        for _name, (store, product) in confirmed.items()
+    ]
+    pricing_results: dict[str, PricingResult] = {}
+    for result in await asyncio.gather(*tasks):
+        pricing_results[result.store_name] = result
+
+    EXCELS_DIR.mkdir(exist_ok=True)
+    base_name = f"pricing_{date.today().isoformat()}"
+    output_path = EXCELS_DIR / f"{base_name}.xlsx"
+    # Auto-increment suffix if file is locked (e.g. open in Excel locally).
+    suffix = 1
+    while True:
+        try:
+            write_results(template_path, output_path, template_rows, pricing_results)
+            break
+        except PermissionError:
+            suffix += 1
+            output_path = EXCELS_DIR / f"{base_name}_{suffix}.xlsx"
+
+    return output_path
 
 
 def run_pricing() -> None:

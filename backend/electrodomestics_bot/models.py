@@ -36,7 +36,7 @@ class ProductResult:
     free_shipping: bool = False
     international: Optional[bool] = False
     available: bool = True
-    image_url: Optional[str] = None  # API-relative path e.g. /images/cetrogar_SKU.jpg; None for non-Magento stores
+    image_url: Optional[str] = None  # Raw CDN URL from the store's search response; None when the store doesn't expose an image
 
     def to_dict(self) -> dict:
         return {
@@ -90,9 +90,9 @@ class ProductResponse(BaseModel):
     available: bool = Field(description="Whether the product is currently in stock")
     image_url: Optional[str] = Field(
         None,
-        description="API-relative path to the product image (e.g. /images/cetrogar_SKU.jpg). "
-        "Null for stores where images are not available (non-Magento). "
-        "Prepend the API base URL to get the full image URL."
+        description="Raw CDN URL of the product image as returned by the store's search response. "
+        "Null when the store doesn't expose an image for the product. "
+        "Use directly — no API base URL prefix needed."
     )
 
     @classmethod

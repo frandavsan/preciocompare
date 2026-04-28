@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, Info, Search } from "lucide-react";
+import { toast } from "sonner";
 import TopNav from "@/components/TopNav";
 import { Checkbox } from "@/components/ui/checkbox";
 import { STORE_KEYS, type StoreKey, getStoreDisplayName } from "@/lib/stores";
@@ -11,6 +12,8 @@ import {
   type StoreGroup,
 } from "@/lib/transforms";
 import { useSearch } from "@/hooks/useSearch";
+import { ApiError, classifyError } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 
 const STORE_OPTIONS_TOP_GAP_REM = 0.6;
 const STORE_OPTIONS_ROW_GAP_REM = 0.4;
@@ -19,8 +22,59 @@ const buildSelectedParam = (
   entries: { storeKey: string; url: string }[],
 ): string => JSON.stringify(entries.map((e) => ({ store: e.storeKey, url: e.url })));
 
+// Wraps a list and caps its visible height to the bottom of the Nth child,
+// so at most `maxItems` rows are visible — the rest scroll inside the box.
+// Measured (not estimated) so it stays correct when names wrap to 2+ lines.
+const ScrollCappedList = ({
+  maxItems,
+  itemCount,
+  children,
+  className = "",
+}: {
+  maxItems: number;
+  itemCount: number;
+  children: ReactNode;
+  className?: string;
+}) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [maxHeight, setMaxHeight] = useState<number | undefined>(undefined);
+
+  useLayoutEffect(() => {
+    if (itemCount <= maxItems) {
+      setMaxHeight(undefined);
+      return;
+    }
+    const node = ref.current;
+    if (!node) return;
+    const measure = () => {
+      const items = node.children;
+      if (items.length < maxItems) return;
+      const nth = items[maxItems - 1] as HTMLElement;
+      const containerTop = node.getBoundingClientRect().top;
+      const nthBottom = nth.getBoundingClientRect().bottom;
+      setMaxHeight(nthBottom - containerTop);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(node);
+    for (const child of Array.from(node.children)) ro.observe(child);
+    return () => ro.disconnect();
+  }, [itemCount, maxItems]);
+
+  return (
+    <div
+      ref={ref}
+      className={`${className} ${maxHeight !== undefined ? "overflow-y-auto pr-1" : ""}`}
+      style={maxHeight !== undefined ? { maxHeight } : undefined}
+    >
+      {children}
+    </div>
+  );
+};
+
 const Landing = () => {
   const navigate = useNavigate();
+  const { signOut } = useAuth();
 
   const [query, setQuery] = useState("");
   const [selectiveSearch, setSelectiveSearch] = useState(true);
@@ -40,10 +94,11 @@ const Landing = () => {
   const [submittedFromCABA, setSubmittedFromCABA] = useState(false);
   const [submitToken, setSubmitToken] = useState(0);
 
-  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [cooldownEndsAt, setCooldownEndsAt] = useState<number | null>(null);
+  const [cooldownSec, setCooldownSec] = useState(0);
 
   const intervalRef = useRef<number | null>(null);
-  const completionRef = useRef<number | null>(null);
   const handledTokenRef = useRef(0);
 
   const { data, isFetching, error } = useSearch(submittedQuery, {
@@ -51,40 +106,81 @@ const Landing = () => {
     postalCode: submittedPostal,
   });
 
-  const isLoading = isFetching || loadingProgress > 0;
+  const isLoading = isFetching;
+
+  // Side-effects for auth/transport-level errors. Inline messages handle
+  // server/unknown errors; this hook only fires for the kinds the user
+  // can't recover from inline (auth, rate limit, network).
+  const handledErrorRef = useRef<unknown>(null);
+  useEffect(() => {
+    if (!error || error === handledErrorRef.current) return;
+    handledErrorRef.current = error;
+    const classified = classifyError(error);
+    if (classified.kind === "auth") {
+      toast.error(classified.title, { description: classified.body });
+      void signOut();
+    } else if (classified.kind === "rate_limit") {
+      toast.error(classified.title, { description: classified.body });
+      const wait =
+        error instanceof ApiError && error.retryAfterSeconds
+          ? error.retryAfterSeconds
+          : 60;
+      setCooldownEndsAt(Date.now() + wait * 1000);
+    } else if (classified.kind === "network") {
+      toast.error(classified.title, { description: classified.body });
+    }
+  }, [error, signOut]);
+
+  // Drive the cooldown countdown — clears itself when the deadline passes.
+  useEffect(() => {
+    if (cooldownEndsAt === null) {
+      setCooldownSec(0);
+      return;
+    }
+    const tick = () => {
+      const remainingMs = cooldownEndsAt - Date.now();
+      if (remainingMs <= 0) {
+        setCooldownEndsAt(null);
+        setCooldownSec(0);
+      } else {
+        setCooldownSec(Math.ceil(remainingMs / 1000));
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, [cooldownEndsAt]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (intervalRef.current !== null) window.clearInterval(intervalRef.current);
-      if (completionRef.current !== null) window.clearTimeout(completionRef.current);
     };
   }, []);
 
-  // Reset and run synthetic ramp on each submit. Capped at 99 so we never
-  // claim completion before the network actually returns.
+  // Tick an elapsed-seconds counter while a fetch is in flight. We show real
+  // elapsed time instead of a synthetic % bar — broad queries take 25-30s and
+  // a fake ramp lies in both directions (pegs at 99% on slow runs, never hits
+  // 100 on fast ones).
   useEffect(() => {
-    if (submitToken === 0) return;
-    setLoadingProgress(1);
+    if (!isFetching) {
+      if (intervalRef.current !== null) {
+        window.clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      return;
+    }
+    setElapsedSec(0);
     const startedAt = Date.now();
-    const expectedMs = 9000;
     const id = window.setInterval(() => {
-      const elapsed = Date.now() - startedAt;
-      const ratio = Math.min(elapsed / expectedMs, 1);
-      setLoadingProgress((prev) => {
-        if (prev >= 100) return prev;
-        const baseTarget = Math.floor(ratio * 99);
-        const jumpSize = Math.floor(Math.random() * 8) + 2;
-        const randomLead = Math.floor(Math.random() * 6);
-        return Math.min(99, Math.max(prev, baseTarget + randomLead, prev + jumpSize));
-      });
-    }, 180);
+      setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
+    }, 250);
     intervalRef.current = id;
     return () => {
       window.clearInterval(id);
       if (intervalRef.current === id) intervalRef.current = null;
     };
-  }, [submitToken]);
+  }, [isFetching]);
 
   // Drive completion exactly once per submit, when the fetch settles.
   useEffect(() => {
@@ -94,38 +190,27 @@ const Landing = () => {
     if (!data && !error) return;
 
     handledTokenRef.current = submitToken;
+    if (error || !data) return;
 
-    if (intervalRef.current !== null) {
-      window.clearInterval(intervalRef.current);
-      intervalRef.current = null;
+    if (submittedSelective) {
+      setShowResults(true);
+      const groups = searchToStoreGroups(data, selectedStoreKeys);
+      setOpenResultStores(
+        groups.filter((g) => g.results.length > 0).slice(0, 2).map((g) => g.storeKey),
+      );
+    } else {
+      const auto = autoSelectProducts(data).filter((s) =>
+        selectedStoreKeys.includes(s.storeKey as StoreKey),
+      );
+      const params = new URLSearchParams({ q: submittedQuery });
+      params.set(
+        "selected",
+        buildSelectedParam(auto.map((s) => ({ storeKey: s.storeKey, url: s.product.url }))),
+      );
+      if (submittedFromCABA) params.set("caba", "1");
+      else if (submittedPostal) params.set("postal_code", submittedPostal);
+      navigate(`/producto?${params.toString()}`);
     }
-    setLoadingProgress(100);
-
-    const id = window.setTimeout(() => {
-      setLoadingProgress(0);
-      if (error || !data) return;
-      if (submittedSelective) {
-        setShowResults(true);
-        const groups = searchToStoreGroups(data, selectedStoreKeys);
-        setOpenResultStores(
-          groups.filter((g) => g.results.length > 0).slice(0, 2).map((g) => g.storeKey),
-        );
-      } else {
-        const auto = autoSelectProducts(data).filter((s) =>
-          selectedStoreKeys.includes(s.storeKey as StoreKey),
-        );
-        const params = new URLSearchParams({ q: submittedQuery });
-        params.set(
-          "selected",
-          buildSelectedParam(auto.map((s) => ({ storeKey: s.storeKey, url: s.product.url }))),
-        );
-        if (submittedFromCABA) params.set("caba", "1");
-        else if (submittedPostal) params.set("postal_code", submittedPostal);
-        navigate(`/producto?${params.toString()}`);
-      }
-      completionRef.current = null;
-    }, 350);
-    completionRef.current = id;
   }, [
     submitToken,
     isFetching,
@@ -208,15 +293,11 @@ const Landing = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = query.trim();
-    if (!trimmed || isFetching) return;
+    if (!trimmed || isFetching || cooldownSec > 0) return;
 
     if (intervalRef.current !== null) {
       window.clearInterval(intervalRef.current);
       intervalRef.current = null;
-    }
-    if (completionRef.current !== null) {
-      window.clearTimeout(completionRef.current);
-      completionRef.current = null;
     }
 
     const trimmedPostal = postalCode.trim();
@@ -232,7 +313,6 @@ const Landing = () => {
     setShowResults(false);
     setOpenResultStores([]);
     setSelectedProductsByStore({});
-    setLoadingProgress(0);
     setSubmitToken((t) => t + 1);
   };
 
@@ -290,17 +370,21 @@ const Landing = () => {
                 <div className="flex min-w-[92px] flex-col items-center">
                   <button
                     type="submit"
-                    disabled={isLoading}
+                    disabled={isLoading || cooldownSec > 0}
                     className="w-full shrink-0 bg-primary px-5 py-3.5 font-mono text-[11px] font-medium uppercase tracking-[0.15em] text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-wait disabled:opacity-90"
                   >
-                    {isLoading ? "Buscando" : "Buscar"}
+                    {cooldownSec > 0
+                      ? `Esperá ${cooldownSec}s`
+                      : isLoading
+                        ? "Buscando"
+                        : "Buscar"}
                   </button>
                   <div className="mt-2 min-h-[22px] flex items-center justify-center">
                     {isLoading && (
                       <div className="inline-flex items-center gap-2 text-muted-foreground">
                         <span className="h-4 w-4 animate-spin rounded-full border-[1.5px] border-border border-t-primary" />
                         <span className="font-mono text-[11px] tracking-[0.08em] tabular-nums">
-                          {loadingProgress}%
+                          {elapsedSec}s
                         </span>
                       </div>
                   )}
@@ -309,15 +393,12 @@ const Landing = () => {
             </div>
             {isLoading && (
               <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted/70">
-                <div
-                  className="h-full rounded-full bg-primary transition-[width] duration-200 ease-out"
-                  style={{ width: `${loadingProgress}%` }}
-                />
+                <div className="h-full w-full rounded-full bg-primary animate-pulse" />
               </div>
             )}
             {!isLoading && error && (
               <p className="mt-3 font-mono text-[11px] uppercase tracking-[0.12em] text-destructive">
-                No se pudo completar la busqueda. Reintenta en unos segundos.
+                {classifyError(error).body}
               </p>
             )}
           </form>
@@ -466,7 +547,7 @@ const Landing = () => {
                         </button>
 
                         {isOpen && (
-                          <div className="mt-4 space-y-2">
+                          <div className="mt-4">
                             {group.results.length === 0 ? (
                               <div className="rounded-sm bg-background/55 px-3 py-3 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
                                 {group.status === "error" || group.status === "timeout"
@@ -474,40 +555,46 @@ const Landing = () => {
                                   : "Sin resultados para esta tienda."}
                               </div>
                             ) : (
-                              group.results.map((result) => (
-                                <label
-                                  key={result.url}
-                                  className="flex cursor-pointer items-start gap-3 rounded-sm bg-background/55 px-3 py-3 transition-colors hover:bg-background/85"
-                                >
-                                  <Checkbox
-                                    checked={selectedProductsByStore[group.storeKey] === result.url}
-                                    onCheckedChange={(checked) =>
-                                      setSelectedProductsByStore((prev) => {
-                                        if (checked === true) {
-                                          return { ...prev, [group.storeKey]: result.url };
-                                        }
-                                        const rest = { ...prev };
-                                        delete rest[group.storeKey];
-                                        return rest;
-                                      })
-                                    }
-                                    className="mt-0.5"
-                                  />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-                                      <span className="text-sm font-medium text-foreground">{result.name}</span>
-                                      <span className="font-mono text-xs font-semibold text-secondary">
-                                        {formatPrice(result.price)}
-                                      </span>
+                              <ScrollCappedList
+                                maxItems={5}
+                                itemCount={group.results.length}
+                                className="space-y-2"
+                              >
+                                {group.results.map((result) => (
+                                  <label
+                                    key={result.url}
+                                    className="flex cursor-pointer items-start gap-3 rounded-sm bg-background/55 px-3 py-3 transition-colors hover:bg-background/85"
+                                  >
+                                    <Checkbox
+                                      checked={selectedProductsByStore[group.storeKey] === result.url}
+                                      onCheckedChange={(checked) =>
+                                        setSelectedProductsByStore((prev) => {
+                                          if (checked === true) {
+                                            return { ...prev, [group.storeKey]: result.url };
+                                          }
+                                          const rest = { ...prev };
+                                          delete rest[group.storeKey];
+                                          return rest;
+                                        })
+                                      }
+                                      className="mt-0.5"
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+                                        <span className="text-sm font-medium text-foreground">{result.name}</span>
+                                        <span className="font-mono text-xs font-semibold text-secondary">
+                                          {formatPrice(result.price)}
+                                        </span>
+                                      </div>
+                                      {result.detail && (
+                                        <span className="mt-1 block font-mono text-[10px] tracking-wide text-muted-foreground">
+                                          {result.detail}
+                                        </span>
+                                      )}
                                     </div>
-                                    {result.detail && (
-                                      <span className="mt-1 block font-mono text-[10px] tracking-wide text-muted-foreground">
-                                        {result.detail}
-                                      </span>
-                                    )}
-                                  </div>
-                                </label>
-                              ))
+                                  </label>
+                                ))}
+                              </ScrollCappedList>
                             )}
                           </div>
                         )}

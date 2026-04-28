@@ -3,8 +3,7 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -12,9 +11,9 @@ from slowapi.util import get_remote_address
 from .auth import require_auth
 from .config import settings
 from .fetching.adapters import ADAPTERS
-from .fetching.image_cache import images_dir as _images_dir
 from .models import ProductResponse, SearchResponse, StoreStatusResponse
 from .fetching.service import search_products
+from .pricing import generate_pricing_excel
 from .monitoring import storage as _storage
 from . import scheduler as _scheduler
 
@@ -43,9 +42,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/images", StaticFiles(directory=_images_dir), name="images")
-
-
 @app.on_event("startup")
 async def _startup():
     _scheduler.start()
@@ -58,7 +54,16 @@ async def _shutdown():
 
 @app.exception_handler(RateLimitExceeded)
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
-    return JSONResponse(status_code=429, content={"error": "Too many requests"})
+    # Both rate-limited endpoints use a 1-minute window, so the worst-case wait
+    # is always ≤60s. Advertise the full window as Retry-After so the client can
+    # safely countdown without overshooting; the next request is accepted as
+    # soon as the actual window slot frees, regardless of the advertised value.
+    retry_after = 60
+    return JSONResponse(
+        status_code=429,
+        content={"error": "Too many requests", "retry_after": retry_after},
+        headers={"Retry-After": str(retry_after)},
+    )
 
 
 @app.exception_handler(Exception)
@@ -145,6 +150,54 @@ async def stores(request: Request, user: dict = Depends(require_auth)):
         }
         for a in ADAPTERS
     ]
+
+
+@app.get(
+    "/pricing/excel",
+    summary="Generate and download payment-plan Excel",
+    description=(
+        "Searches the pricing stores (Cetrogar, OnCity, Castillo, Montes Hermanos), "
+        "fetches every payment plan, fills the template spreadsheet, and returns "
+        "the resulting `.xlsx` as an attachment. Heavier than `/search` — capped "
+        "at 5 requests/minute per IP."
+    ),
+    responses={
+        200: {
+            "content": {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
+            },
+            "description": "Filled spreadsheet returned as a download.",
+        },
+        401: {"description": "Missing or invalid Supabase JWT"},
+        404: {"description": "No products found in any pricing store"},
+        429: {"description": "Rate limit exceeded (5 requests/minute per IP)"},
+        503: {"description": "Pricing pipeline failed (template missing, fetch errors, etc.)"},
+    },
+)
+@limiter.limit("5/minute")
+async def pricing_excel(
+    request: Request,
+    q: str = Query(description="Product model name or SKU (e.g. 'Samsung S26', 'PS5')"),
+    user: dict = Depends(require_auth),
+):
+    """Run the pricing pipeline and stream the filled Excel as a download."""
+    try:
+        output_path = await generate_pricing_excel(q)
+    except FileNotFoundError as e:
+        logger.error("Pricing template missing: %s", e)
+        raise HTTPException(status_code=503, detail="Pricing template not configured")
+    except Exception as e:
+        logger.error("Pricing generation failed for '%s': %s", q, e, exc_info=True)
+        raise HTTPException(status_code=503, detail="Pricing generation failed")
+
+    if output_path is None:
+        raise HTTPException(status_code=404, detail="No products found in pricing stores")
+
+    return FileResponse(
+        path=output_path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=output_path.name,
+    )
 
 
 @app.get("/health", summary="Health check (public)")
