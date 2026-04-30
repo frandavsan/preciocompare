@@ -158,9 +158,14 @@ export function listStores(token: string, init?: RequestInit): Promise<StoreInfo
 export async function downloadPricingExcel(
   q: string,
   token: string,
+  commerceName?: string,
   init?: RequestInit,
 ): Promise<{ blob: Blob; filename: string }> {
   const params = new URLSearchParams({ q });
+  const trimmedCommerceName = commerceName?.trim();
+  if (trimmedCommerceName) {
+    params.set("commerce_name", trimmedCommerceName);
+  }
   const response = await fetch(`${API_BASE_URL}/pricing/excel?${params}`, {
     ...init,
     headers: {

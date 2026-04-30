@@ -1,7 +1,8 @@
 import { Link, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 
-type TopNavSection = "intelligence" | "market-data" | "access";
+type TopNavSection = "intelligence" | "market-data" | "settings" | "access";
 
 interface TopNavProps {
   activeSection: TopNavSection;
@@ -13,8 +14,11 @@ const baseNavItems: Array<{
   to: string;
 }> = [
   { key: "intelligence", label: "Buscar", to: "/" },
-  { key: "market-data", label: "Resultados", to: "/producto?q=PlayStation+5+Slim" },
+  { key: "market-data", label: "Resultados", to: "/producto" },
+  { key: "settings", label: "Configuracion", to: "/configuracion" },
 ];
+
+const LAST_RESULTS_PATH_KEY = "preciocompare:last-results-path";
 
 const TopNav = ({ activeSection }: TopNavProps) => {
   const { session, signOut } = useAuth();
@@ -23,6 +27,15 @@ const TopNav = ({ activeSection }: TopNavProps) => {
   const handleSignOut = async () => {
     await signOut();
     navigate("/signin", { replace: true });
+  };
+
+  const handleResultsClick = () => {
+    const lastResultsPath = window.sessionStorage.getItem(LAST_RESULTS_PATH_KEY);
+    if (!lastResultsPath) {
+      toast.warning("Primero debes realizar una búsqueda");
+      return;
+    }
+    navigate(lastResultsPath);
   };
 
   return (
@@ -41,9 +54,20 @@ const TopNav = ({ activeSection }: TopNavProps) => {
               {item.label}
             </span>
           ) : (
-            <Link key={item.key} to={item.to} className="transition-opacity hover:opacity-70">
-              {item.label}
-            </Link>
+            item.key === "market-data" ? (
+              <button
+                key={item.key}
+                type="button"
+                onClick={handleResultsClick}
+                className="transition-opacity hover:opacity-70"
+              >
+                {item.label}
+              </button>
+            ) : (
+              <Link key={item.key} to={item.to} className="transition-opacity hover:opacity-70">
+                {item.label}
+              </Link>
+            )
           )
         )}
         {session ? (

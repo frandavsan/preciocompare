@@ -1,0 +1,44 @@
+The simple two-branch workflow (recommended for your scale)
+# Switch to dev
+git checkout -b dev          # first time only
+git checkout dev             # subsequent
+
+# Work as usual — commit + push freely; nothing hits production
+git add ...
+git commit -m "wip: trying X"
+git push -u origin dev
+
+# When dev is in a good state and you want to ship:
+git checkout main
+git merge dev                # or open a PR on GitHub for the diff review
+git push                     # auto-deploy fires
+
+
+
+Test locally during dev
+# Frontend
+cd frontend && npm run dev   # http://localhost:5173 against the deployed backend
+                             # or against a local backend if you also boot one
+
+# Backend
+cd backend && uvicorn electrodomestics_bot.api:app --reload
+Local development flow
+
+1. Start the backend API
+   cd C:\Users\Frand\Documents\Bots\ElectrodomesticsBot\backend
+   python -m uvicorn electrodomestics_bot.api:app --host 0.0.0.0 --port 8000 --reload
+
+2. Start the frontend dev server in a second terminal
+   cd C:\Users\Frand\Documents\Bots\ElectrodomesticsBot\frontend
+   npm run dev
+
+3. Open the local app
+   http://localhost:8080
+
+Important
+
+- Do not use the Cloudflare or Render URLs while developing locally.
+- frontend/.env.development is used by npm run dev.
+- frontend/.env.production is used by production builds/deploys.
+- In local dev, VITE_API_BASE_URL should be /api so Vite proxies requests to http://localhost:8000.
+- If localhost:8080 is blank, restart npm run dev after changing env files and check the browser console.

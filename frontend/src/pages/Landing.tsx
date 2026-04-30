@@ -17,6 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 
 const STORE_OPTIONS_TOP_GAP_REM = 0.6;
 const STORE_OPTIONS_ROW_GAP_REM = 0.4;
+const LAST_RESULTS_PATH_KEY = "preciocompare:last-results-path";
 
 const buildSelectedParam = (
   entries: { storeKey: string; url: string }[],
@@ -77,9 +78,10 @@ const Landing = () => {
   const { signOut } = useAuth();
 
   const [query, setQuery] = useState("");
-  const [selectiveSearch, setSelectiveSearch] = useState(true);
-  const [fromCABA, setFromCABA] = useState(false);
+  const [selectiveSearch, setSelectiveSearch] = useState(false);
+  const [fromCABA, setFromCABA] = useState(true);
   const [postalCode, setPostalCode] = useState("");
+  const [postalCodeError, setPostalCodeError] = useState("");
   const [searchAllStores, setSearchAllStores] = useState(true);
   const [selectedStoreKeys, setSelectedStoreKeys] = useState<readonly StoreKey[]>(STORE_KEYS);
   const [isStoresOpen, setIsStoresOpen] = useState(false);
@@ -90,8 +92,8 @@ const Landing = () => {
 
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [submittedPostal, setSubmittedPostal] = useState<string | undefined>(undefined);
-  const [submittedSelective, setSubmittedSelective] = useState(true);
-  const [submittedFromCABA, setSubmittedFromCABA] = useState(false);
+  const [submittedSelective, setSubmittedSelective] = useState(false);
+  const [submittedFromCABA, setSubmittedFromCABA] = useState(true);
   const [submitToken, setSubmitToken] = useState(0);
 
   const [elapsedSec, setElapsedSec] = useState(0);
@@ -209,7 +211,9 @@ const Landing = () => {
       );
       if (submittedFromCABA) params.set("caba", "1");
       else if (submittedPostal) params.set("postal_code", submittedPostal);
-      navigate(`/producto?${params.toString()}`);
+      const resultsPath = `/producto?${params.toString()}`;
+      window.sessionStorage.setItem(LAST_RESULTS_PATH_KEY, resultsPath);
+      navigate(resultsPath);
     }
   }, [
     submitToken,
@@ -287,7 +291,9 @@ const Landing = () => {
       const cp = (submittedPostal ?? postalCode).trim();
       if (cp) params.set("postal_code", cp);
     }
-    navigate(`/producto?${params.toString()}`);
+    const resultsPath = `/producto?${params.toString()}`;
+    window.sessionStorage.setItem(LAST_RESULTS_PATH_KEY, resultsPath);
+    navigate(resultsPath);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -301,6 +307,12 @@ const Landing = () => {
     }
 
     const trimmedPostal = postalCode.trim();
+    if (!fromCABA && !trimmedPostal) {
+      setPostalCodeError("Ingresa un codigo postal para continuar.");
+      return;
+    }
+    setPostalCodeError("");
+
     // CABA → send "1425" explicitly so the backend bypasses cache and runs a
     // live shipping simulation (matches the terminal's behavior).
     const effectivePostal = fromCABA ? "1425" : (trimmedPostal || undefined);
@@ -425,7 +437,11 @@ const Landing = () => {
                 <Checkbox
                   id="caba"
                   checked={fromCABA}
-                  onCheckedChange={(checked) => setFromCABA(checked === true)}
+                  onCheckedChange={(checked) => {
+                    const next = checked === true;
+                    setFromCABA(next);
+                    if (next) setPostalCodeError("");
+                  }}
                   className="mt-0.5"
                 />
                 <div>
@@ -438,12 +454,23 @@ const Landing = () => {
                         type="text"
                         inputMode="numeric"
                         value={postalCode}
-                        onChange={(e) => setPostalCode(e.target.value)}
+                        onChange={(e) => {
+                          setPostalCode(e.target.value);
+                          if (e.target.value.trim()) setPostalCodeError("");
+                        }}
                         placeholder="Codigo Postal"
-                        className="h-7 w-32 rounded-sm border border-border bg-card/80 px-2.5 font-mono text-[10px] uppercase tracking-[0.08em] text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:bg-card"
+                        aria-invalid={postalCodeError ? "true" : "false"}
+                        className={`h-7 w-32 rounded-sm border bg-card/80 px-2.5 font-mono text-[10px] uppercase tracking-[0.08em] text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:bg-card ${
+                          postalCodeError ? "border-destructive" : "border-border"
+                        }`}
                       />
                     )}
                   </div>
+                  {!fromCABA && postalCodeError && (
+                    <span className="mt-1 block font-mono text-[10px] tracking-wide text-destructive">
+                      {postalCodeError}
+                    </span>
+                  )}
                   <span className="mt-0.5 block font-mono text-[10px] tracking-wide text-muted-foreground">
                     Simular busqueda con envio y disponibilidad en CABA
                   </span>
@@ -460,7 +487,7 @@ const Landing = () => {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <label htmlFor="search-all-stores" className="block cursor-pointer text-sm leading-tight text-foreground">
-                      Search all stores
+                      Buscar en todas las tiendas
                     </label>
                     <button
                       type="button"

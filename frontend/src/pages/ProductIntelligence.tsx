@@ -76,6 +76,7 @@ const messageForExcelError = (err: unknown): string => {
 };
 
 const HISTORY_MONTHS = ["Sep", "Oct", "Nov", "Dic", "Ene", "Feb", "Mar"];
+const LAST_RESULTS_PATH_KEY = "preciocompare:last-results-path";
 
 // Hero image fallback order — VTEX CDNs (cetrogar/oncity/castillo) are the most
 // reliable, followed by Montes Hermanos (also VTEX), then Fravega (often null),
@@ -169,7 +170,24 @@ const ProductIntelligence = () => {
     postalCode: effectivePostal,
   });
 
-  const { signOut, token } = useAuth();
+  const { session, signOut, token } = useAuth();
+  const commerceName = useMemo(() => {
+    const email = session?.user.email?.toLowerCase();
+    if (!email) return "Mi comercio";
+    return (
+      window.localStorage.getItem(`preciocompare:commerce-name:${email}`)?.trim()
+      || "Mi comercio"
+    );
+  }, [session?.user.email]);
+
+  useEffect(() => {
+    if (!query) return;
+    window.sessionStorage.setItem(
+      LAST_RESULTS_PATH_KEY,
+      `${window.location.pathname}${window.location.search}`,
+    );
+  }, [query, searchParams]);
+
   const handledErrorRef = useRef<unknown>(null);
   useEffect(() => {
     if (!error || error === handledErrorRef.current) return;
@@ -356,7 +374,7 @@ const ProductIntelligence = () => {
     setIsPaymentAnalysisLoading(true);
     setPaymentAnalysisError(null);
     try {
-      const { blob, filename } = await downloadPricingExcel(query, token);
+      const { blob, filename } = await downloadPricingExcel(query, token, commerceName);
       // Trigger a browser download via a transient anchor — no library needed.
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");

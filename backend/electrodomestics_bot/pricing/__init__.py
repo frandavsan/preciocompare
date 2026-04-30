@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-TEMPLATE_PATH = _PROJECT_ROOT / "Precios E-commerce El Gato (1).xlsx"
+TEMPLATE_PATH = _PROJECT_ROOT / "excel_template.xlsx"
 EXCELS_DIR = _PROJECT_ROOT / "excels"
 
 from .adapters import PRICING_STORES
@@ -33,7 +33,7 @@ def _slugify(value: str, max_len: int = 30) -> str:
     return cleaned or "query"
 
 
-async def generate_pricing_excel(query: str) -> Optional[Path]:
+async def generate_pricing_excel(query: str, commerce_name: str | None = None) -> Optional[Path]:
     """Non-interactive pipeline used by the API: search → top-match per store →
     fetch all plans → write Excel. Returns the output path on success, or None
     when no pricing store returned any product. Raises FileNotFoundError when
@@ -71,7 +71,12 @@ async def generate_pricing_excel(query: str) -> Optional[Path]:
         f"pricing_{date.today().isoformat()}_{_slugify(query)}_{uuid.uuid4().hex[:8]}.xlsx"
     )
     await asyncio.to_thread(
-        write_results, template_path, output_path, template_rows, pricing_results
+        write_results,
+        template_path,
+        output_path,
+        template_rows,
+        pricing_results,
+        commerce_name,
     )
 
     return output_path

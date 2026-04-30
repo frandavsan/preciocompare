@@ -9,19 +9,19 @@ interface UseSearchOptions {
 }
 
 // Single source of truth for /search. Both Landing and ProductIntelligence
-// call this; React Query dedupes by ["search", q, detail, postalCode] so a
-// navigation from Landing -> ProductIntelligence reuses the cached result
-// without a second network round-trip.
+// call this; React Query dedupes by query + request options + token. Including
+// the token prevents a cached 401 from a previous/expired session from
+// immediately logging out a freshly signed-in user.
 export function useSearch(
   q: string,
   options: UseSearchOptions = {},
 ): UseQueryResult<SearchResponse> {
   const { token } = useAuth();
-  const { enabled = true, detail = false, postalCode } = options;
+  const { enabled = true, detail = true, postalCode } = options;
   const trimmed = q.trim();
 
   return useQuery<SearchResponse>({
-    queryKey: ["search", trimmed, detail, postalCode ?? null],
+    queryKey: ["search", trimmed, detail, postalCode ?? null, token],
     queryFn: ({ signal }) =>
       searchProducts(trimmed, detail, token as string, { signal }, postalCode),
     enabled: Boolean(enabled && trimmed && token),

@@ -50,11 +50,23 @@ export function bestSinInteresCount(product: ProductResponse): number | null {
   return best;
 }
 
-export function formatBestPromo(product: ProductResponse): string | null {
+function bestSinInteresInstallment(product: ProductResponse) {
   const count = bestSinInteresCount(product);
   if (count === null || product.price === null) return null;
+  return product.installments.find((ins) => {
+    if (ins.count !== count) return false;
+    const total = ins.amount * ins.count;
+    return total <= product.price * 1.01;
+  }) ?? null;
+}
+
+export function formatBestPromo(product: ProductResponse): string | null {
+  const installment = bestSinInteresInstallment(product);
+  if (!installment || product.price === null) return null;
+  const count = installment.count;
   const installmentAmount = Math.round(product.price / count);
-  return `${count}x sin interes de ${formatPrice(installmentAmount)}`;
+  const issuer = installment.cards.find((card) => card.trim().length > 0)?.trim();
+  return `${count}x sin interes de ${formatPrice(installmentAmount)}${issuer ? ` (${issuer})` : ""}`;
 }
 
 function buildResultDetail(product: ProductResponse): string {

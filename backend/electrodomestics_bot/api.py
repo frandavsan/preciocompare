@@ -180,11 +180,16 @@ async def pricing_excel(
     # min_length=3 mirrors the CLI's pricing guard — anything shorter fans out
     # to every store and plan-fetch path with no chance of a useful match.
     q: str = Query(min_length=3, description="Product model name or SKU (e.g. 'Samsung S26', 'PS5')"),
+    commerce_name: str | None = Query(
+        default=None,
+        max_length=120,
+        description="Commerce name to place in the generated workbook.",
+    ),
     user: dict = Depends(require_auth),
 ):
     """Run the pricing pipeline and stream the filled Excel as a download."""
     try:
-        output_path = await generate_pricing_excel(q)
+        output_path = await generate_pricing_excel(q, commerce_name=commerce_name)
     except FileNotFoundError as e:
         logger.error("Pricing template missing: %s", e)
         raise HTTPException(status_code=503, detail="Pricing template not configured")
