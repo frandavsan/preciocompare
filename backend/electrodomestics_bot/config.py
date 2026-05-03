@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     telegram_chat_id: str = ""
     telegram_enabled: bool = True
     alert_min_severity: str = "critical"
+    # Shared secret echoed back by Telegram via the
+    # X-Telegram-Bot-Api-Secret-Token header on every webhook delivery. When
+    # empty, the inbound /telegram/webhook endpoint refuses all calls.
+    telegram_webhook_secret: str = ""
+
+    # -- Frontend --
+    # Used by the Telegram /health command to verify the public site responds.
+    frontend_url: str = "https://preciocompare.com"
 
     # -- Scheduler --
     scheduler_enabled: bool = True

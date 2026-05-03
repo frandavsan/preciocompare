@@ -110,22 +110,27 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     async def _main() -> int:
-        from .alerts import alert_canary_failures
+        from .alerts import notify_canary_run, start_worker, stop_worker
 
-        print("Running canary checks...")
-        failures = await run_all()
+        await start_worker()
+        try:
+            print("Running canary checks...")
+            failures = await run_all()
 
-        if failures:
-            print(f"\n{len(failures)} failure(s):")
-            for f in failures:
-                print(
-                    f"  [{f['store']}] {f['query']!r}: "
-                    f"{f['failure_reason']} ({f['duration_ms']} ms)"
-                )
-            await alert_canary_failures(failures)
-            return 1
-
-        print("All checks passed.")
-        return 0
+            if failures:
+                print(f"\n{len(failures)} failure(s):")
+                for f in failures:
+                    print(
+                        f"  [{f['store']}] {f['query']!r}: "
+                        f"{f['failure_reason']} ({f['duration_ms']} ms)"
+                    )
+            else:
+                print("All checks passed.")
+            notify_canary_run(failures, total_checks=len(CANARY_CHECKS))
+            # Drain any queued messages before exit.
+            await asyncio.sleep(2.0)
+        finally:
+            await stop_worker()
+        return 1 if failures else 0
 
     sys.exit(asyncio.run(_main()))

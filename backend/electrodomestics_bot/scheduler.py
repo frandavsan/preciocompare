@@ -30,8 +30,8 @@ _scheduler: AsyncIOScheduler | None = None
 async def _refresh_job() -> None:
     """Runs a full cache refresh followed by canary checks."""
     from .refresh import refresh_all
-    from .monitoring.canary import run_all as run_canaries
-    from .monitoring.alerts import alert_canary_failures
+    from .monitoring.canary import run_all as run_canaries, CANARY_CHECKS
+    from .monitoring.alerts import notify_canary_run
 
     logger.info("Scheduled refresh starting")
     try:
@@ -46,26 +46,26 @@ async def _refresh_job() -> None:
         failures = await run_canaries()
         if failures:
             logger.warning("Canary: %d failure(s)", len(failures))
-            await alert_canary_failures(failures)
         else:
             logger.info("Canary: all checks passed")
+        notify_canary_run(failures, total_checks=len(CANARY_CHECKS))
     except Exception:
         logger.exception("Post-refresh canary failed")
 
 
 async def _canary_job() -> None:
     """Runs canary health checks (standalone, between refreshes)."""
-    from .monitoring.canary import run_all as run_canaries
-    from .monitoring.alerts import alert_canary_failures
+    from .monitoring.canary import run_all as run_canaries, CANARY_CHECKS
+    from .monitoring.alerts import notify_canary_run
 
     logger.info("Scheduled canary starting")
     try:
         failures = await run_canaries()
         if failures:
             logger.warning("Canary: %d failure(s)", len(failures))
-            await alert_canary_failures(failures)
         else:
             logger.info("Canary: all checks passed")
+        notify_canary_run(failures, total_checks=len(CANARY_CHECKS))
     except Exception:
         logger.exception("Scheduled canary failed")
 

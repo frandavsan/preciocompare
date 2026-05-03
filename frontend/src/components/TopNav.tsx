@@ -15,7 +15,7 @@ const baseNavItems: Array<{
 }> = [
   { key: "intelligence", label: "Buscar", to: "/" },
   { key: "market-data", label: "Resultados", to: "/producto" },
-  { key: "settings", label: "Configuracion", to: "/configuracion" },
+  { key: "settings", label: "Configuración", to: "/configuracion" },
 ];
 
 const LAST_RESULTS_PATH_KEY = "preciocompare:last-results-path";
@@ -53,22 +53,20 @@ const TopNav = ({ activeSection }: TopNavProps) => {
             <span key={item.key} className="border-b-2 border-[#3f1476] pb-1 font-semibold text-[#3f1476]">
               {item.label}
             </span>
+          ) : item.key === "market-data" ? (
+            <button
+              key={item.key}
+              type="button"
+              onClick={handleResultsClick}
+              className="transition-opacity hover:opacity-70"
+            >
+              {item.label}
+            </button>
           ) : (
-            item.key === "market-data" ? (
-              <button
-                key={item.key}
-                type="button"
-                onClick={handleResultsClick}
-                className="transition-opacity hover:opacity-70"
-              >
-                {item.label}
-              </button>
-            ) : (
-              <Link key={item.key} to={item.to} className="transition-opacity hover:opacity-70">
-                {item.label}
-              </Link>
-            )
-          )
+            <Link key={item.key} to={item.to} className="transition-opacity hover:opacity-70">
+              {item.label}
+            </Link>
+          ),
         )}
         {session ? (
           <button

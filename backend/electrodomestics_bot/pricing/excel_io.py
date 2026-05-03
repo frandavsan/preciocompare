@@ -129,7 +129,7 @@ def write_results(
             cells_written += 1
             analysis_ws = _get_analysis_sheet(wb)
             if analysis_ws is not None:
-                analysis_ws[_ANALYSIS_COMMERCE_CELL] = normalized_commerce_name
+                analysis_ws[_ANALYSIS_COMMERCE_CELL] = normalized_commerce_name.upper()
                 cells_written += 1
 
         if price_row is not None:

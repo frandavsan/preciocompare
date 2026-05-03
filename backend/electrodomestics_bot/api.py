@@ -1,7 +1,11 @@
+import asyncio
 import logging
+import time
+from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+import httpx
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from slowapi import Limiter
@@ -10,12 +14,23 @@ from slowapi.util import get_remote_address
 
 from .auth import require_auth
 from .config import settings
+from .fetching import cache as _cache
 from .fetching.adapters import ADAPTERS
 from .models import ProductResponse, SearchResponse, StoreStatusResponse
 from .fetching.service import search_products
 from .pricing import generate_pricing_excel
 from .monitoring import storage as _storage
+from .monitoring.alerts import (
+    notify_login,
+    notify_request,
+    send_to_chat,
+    start_worker as _start_telegram,
+    stop_worker as _stop_telegram,
+)
 from . import scheduler as _scheduler
+
+# Wall-clock when the process booted — used by the /health Telegram command.
+_started_at = time.monotonic()
 
 logging.basicConfig(
     level=settings.log_level,
@@ -44,12 +59,14 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def _startup():
+    await _start_telegram()
     _scheduler.start()
 
 
 @app.on_event("shutdown")
 async def _shutdown():
     _scheduler.stop()
+    await _stop_telegram()
 
 
 @app.exception_handler(RateLimitExceeded)
@@ -112,6 +129,7 @@ async def search(
     user: dict = Depends(require_auth),
 ):
     """Search all stores for a product model or SKU."""
+    notify_request(user.get("email"), "Search", query=q)
     try:
         raw = await search_products(q, detail, postal_code=postal_code)
         results = {}
@@ -188,6 +206,7 @@ async def pricing_excel(
     user: dict = Depends(require_auth),
 ):
     """Run the pricing pipeline and stream the filled Excel as a download."""
+    notify_request(user.get("email"), "Price analysis")
     try:
         output_path = await generate_pricing_excel(q, commerce_name=commerce_name)
     except FileNotFoundError as e:
@@ -269,3 +288,135 @@ async def acknowledge_anomaly(anomaly_id: int, user: dict = Depends(require_auth
     if not updated:
         raise HTTPException(status_code=404, detail=f"Anomaly {anomaly_id} not found")
     return {"acknowledged": True, "id": anomaly_id}
+
+
+# ---------------------------------------------------------------------------
+# Telemetry + Telegram bot
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/telemetry/login",
+    summary="Record a successful sign-in (frontend telemetry)",
+    description=(
+        "Called by the frontend right after `signInWithPassword` succeeds. "
+        "Fires a Telegram notification with the user's email. Returns 204."
+    ),
+    responses={
+        401: {"description": "Missing or invalid Supabase JWT"},
+        429: {"description": "Rate limit exceeded (10 requests/minute per IP)"},
+    },
+    status_code=204,
+)
+@limiter.limit("10/minute")
+async def telemetry_login(request: Request, user: dict = Depends(require_auth)):
+    notify_login(user.get("email") or "unknown")
+    return Response(status_code=204)
+
+
+@app.post("/telegram/webhook", include_in_schema=False)
+async def telegram_webhook(request: Request):
+    """Inbound endpoint for Telegram bot updates.
+
+    Validates Telegram's secret-token header, ignores anything outside the
+    configured chat, and dispatches /commands. The only command today is
+    /health, which replies with a backend + frontend status snapshot."""
+    expected = settings.telegram_webhook_secret
+    if not expected:
+        # Webhook intentionally disabled until a secret is configured.
+        raise HTTPException(403, "Webhook disabled")
+    received = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if received != expected:
+        raise HTTPException(403, "Invalid webhook secret")
+
+    try:
+        update = await request.json()
+    except Exception:
+        return {"ok": False}
+
+    message = update.get("message") or update.get("edited_message") or {}
+    chat = message.get("chat") or {}
+    chat_id = chat.get("id")
+    text = (message.get("text") or "").strip()
+
+    if not chat_id or not text:
+        return {"ok": True}
+
+    # Only respond inside the configured group — prevents random users who
+    # discover the bot from triggering commands.
+    if str(chat_id) != str(settings.telegram_chat_id):
+        return {"ok": True}
+
+    # "/health" or "/health@MyBot" → strip both the args and the @suffix.
+    cmd = text.split()[0].split("@")[0].lower()
+
+    if cmd == "/health":
+        report = await _build_health_report()
+        await send_to_chat(chat_id, report)
+
+    return {"ok": True}
+
+
+def _format_until(iso_str: Optional[str]) -> str:
+    if not iso_str:
+        return "n/a"
+    try:
+        dt = datetime.fromisoformat(iso_str)
+        delta = (dt - datetime.now(timezone.utc)).total_seconds()
+        if delta <= 0:
+            return "now"
+        h, rem = divmod(int(delta), 3600)
+        m, _ = divmod(rem, 60)
+        return f"{h}h {m}m" if h else f"{m}m"
+    except Exception:
+        return "n/a"
+
+
+async def _check_frontend(url: str) -> str:
+    try:
+        async with httpx.AsyncClient(timeout=3.0, follow_redirects=True) as client:
+            resp = await client.head(url)
+            label = "OK" if resp.is_success else "ERROR"
+            return f"{resp.status_code} {label}"
+    except Exception as exc:
+        return f"unreachable ({type(exc).__name__})"
+
+
+async def _build_health_report() -> str:
+    """Plain-text health snapshot for the Telegram /health command."""
+    uptime_s = int(time.monotonic() - _started_at)
+    h, rem = divmod(uptime_s, 3600)
+    m, _ = divmod(rem, 60)
+
+    sched = _scheduler.get_status()
+    canary = _storage.get_last_canary_per_store()
+    open_anomalies = _storage.get_open_anomalies()
+
+    n_passed = sum(1 for c in canary.values() if c.get("passed"))
+    n_total = len(canary)
+
+    next_canary = "n/a"
+    for j in sched.get("jobs", []) or []:
+        if j.get("id") == "canary":
+            next_canary = _format_until(j.get("next_run_utc"))
+            break
+
+    sched_state = "running" if sched.get("running") else (
+        "disabled" if not sched.get("enabled") else "stopped"
+    )
+    cache_state = "disabled" if _cache.CACHE_DISABLED else "enabled"
+    frontend_status = await _check_frontend(settings.frontend_url)
+
+    stores_line = (
+        f"Stores up: {n_passed}/{n_total}" if n_total else "Stores up: no canary data yet"
+    )
+    lines = [
+        "<b>Health check</b>",
+        f"Backend: OK · uptime {h}h {m}m",
+        f"Scheduler: {sched_state} · next canary in {next_canary}",
+        stores_line,
+        f"Anomalies open: {len(open_anomalies)}",
+        f"Cache: {cache_state}",
+        f"Frontend: {frontend_status}",
+    ]
+    return "\n".join(lines)

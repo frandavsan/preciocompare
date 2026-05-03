@@ -26,8 +26,12 @@ from datetime import datetime, timezone
 from .fetching import cache
 from .fetching.adapters import ADAPTERS
 from .monitoring import storage as _storage
-from .monitoring.canary import run_all as _run_canaries
-from .monitoring.alerts import alert_canary_failures as _alert_canary
+from .monitoring.canary import run_all as _run_canaries, CANARY_CHECKS as _CANARY_CHECKS
+from .monitoring.alerts import (
+    notify_canary_run as _notify_canary_run,
+    start_worker as _start_telegram,
+    stop_worker as _stop_telegram,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -151,14 +155,19 @@ def main() -> None:
     conn.close()
 
     async def _post_refresh():
-        failures = await _run_canaries()
-        if failures:
-            print(f"{len(failures)} canary failure(s):")
-            for f in failures:
-                print(f"  [{f['store']}] {f['query']!r}: {f['failure_reason']} ({f['duration_ms']} ms)")
-            await _alert_canary(failures)
-        else:
-            print("All canaries passed.")
+        await _start_telegram()
+        try:
+            failures = await _run_canaries()
+            if failures:
+                print(f"{len(failures)} canary failure(s):")
+                for f in failures:
+                    print(f"  [{f['store']}] {f['query']!r}: {f['failure_reason']} ({f['duration_ms']} ms)")
+            else:
+                print("All canaries passed.")
+            _notify_canary_run(failures, total_checks=len(_CANARY_CHECKS))
+            await asyncio.sleep(2.0)
+        finally:
+            await _stop_telegram()
 
     print("\nRunning canary checks...")
     asyncio.run(_post_refresh())

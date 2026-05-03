@@ -38,10 +38,11 @@ const SignIn = () => {
     setIsSubmitting(true);
     setError(null);
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+    const { data: signInData, error: signInError } =
+      await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
     if (signInError) {
       setError(
@@ -51,6 +52,19 @@ const SignIn = () => {
       );
       setIsSubmitting(false);
       return;
+    }
+
+    // Fire-and-forget login telemetry. Failure must never block the redirect —
+    // we don't want a backend hiccup to keep the user stuck on /signin.
+    const accessToken = signInData?.session?.access_token;
+    const apiBase = import.meta.env.VITE_API_BASE_URL;
+    if (accessToken && apiBase) {
+      void fetch(`${apiBase}/telemetry/login`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).catch(() => {
+        // swallow — telemetry is best-effort
+      });
     }
 
     navigate(buildReturnPath(location.state as LocationState), { replace: true });
