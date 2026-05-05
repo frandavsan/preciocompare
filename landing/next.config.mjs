@@ -7,6 +7,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Static export — produces ./out for plain static hosting on Cloudflare Pages.
+  output: "export",
   turbopack: {
     root: __dirname,
   },
