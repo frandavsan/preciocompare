@@ -45,8 +45,16 @@ const initialFormData: AccessRequestFormData = {
   category: "",
 }
 
+// Backend lives on a different host than the static landing — point at it via
+// env var with a sensible production default. Mirrors the navbar APP_URL pattern.
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  (process.env.NODE_ENV === "production"
+    ? "https://preciocompare-api.onrender.com"
+    : "http://localhost:8000")
+
 async function submitAccessRequest(data: AccessRequestPayload) {
-  const response = await fetch("/api/access-request", {
+  const response = await fetch(`${API_BASE_URL}/access-request`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

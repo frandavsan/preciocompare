@@ -223,6 +223,26 @@ def notify_request(
     _enqueue("\n".join(lines))
 
 
+def notify_access_request(
+    name: str,
+    email: str,
+    business_name: str,
+    website_or_instagram: str,
+    category: str,
+) -> None:
+    """Public-form access-request submission. Fire-and-forget — the frontend
+    never waits for Telegram delivery, only for the endpoint's 200."""
+    lines = [
+        "<b>New signup!</b>",
+        f"Nombre: {_esc(name)}",
+        f"Email: {_esc(email)}",
+        f"Negocio: {_esc(business_name)}",
+        f"Sitio web o Instagram: {_esc(website_or_instagram)}",
+        f"Categoría principal: {_esc(category)}",
+    ]
+    _enqueue("\n".join(lines))
+
+
 def notify_canary_run(failures: list[dict], total_checks: int) -> None:
     """Heartbeat-style canary notification: fires whether or not there were failures."""
     if not failures:

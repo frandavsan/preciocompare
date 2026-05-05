@@ -1,6 +1,20 @@
+import type { Metadata } from "next"
 import { AccessRequestForm } from "@/components/access/access-request-form"
 import { BackgroundBlobs } from "@/components/site/background-blobs"
 import { Navbar } from "@/components/site/navbar"
+
+export const metadata: Metadata = {
+  title: "Solicitar acceso | Inteligencia de precios retail",
+  description:
+    "Pedí acceso privado a PrecioCompare, una herramienta para comparar precios, stock, cuotas y envío entre competidores argentinos de electrónica.",
+  alternates: { canonical: "/solicitar-acceso" },
+  openGraph: {
+    title: "Solicitar acceso a PrecioCompare",
+    description:
+      "Acceso privado para retailers argentinos de electrónica. Pedí tu acceso y revisamos el registro manualmente.",
+    url: "/solicitar-acceso",
+  },
+}
 
 const reassurances = [
   "Sin tarjeta.",

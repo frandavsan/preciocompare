@@ -158,13 +158,6 @@ const SignIn = () => {
           </div>
         </div>
 
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-4 font-mono text-[10px] uppercase tracking-[0.3em] text-[#7c7484]/60">
-          <span>Market Analytics</span>
-          <span className="h-1 w-1 rounded-full bg-[#7c7484]/60" />
-          <span>Real-time Pricing</span>
-          <span className="h-1 w-1 rounded-full bg-[#7c7484]/60" />
-          <span>Global Coverage</span>
-        </div>
       </main>
 
       <footer className="relative z-10 flex flex-col items-center justify-between gap-4 px-6 py-5 text-center md:flex-row md:px-8 md:text-left">

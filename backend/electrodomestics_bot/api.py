@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -8,6 +9,7 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -21,6 +23,7 @@ from .fetching.service import search_products
 from .pricing import generate_pricing_excel
 from .monitoring import storage as _storage
 from .monitoring.alerts import (
+    notify_access_request,
     notify_login,
     notify_request,
     send_to_chat,
@@ -293,6 +296,110 @@ async def acknowledge_anomaly(anomaly_id: int, user: dict = Depends(require_auth
 # ---------------------------------------------------------------------------
 # Telemetry + Telegram bot
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Public access-request form (landing page)
+# ---------------------------------------------------------------------------
+
+
+_ALLOWED_CATEGORIES = {
+    "Electrónica",
+    "Electrodomésticos",
+    "Informática",
+    "Celulares",
+    "Otro",
+}
+_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+_URL_OR_IG_RE = re.compile(
+    r"^@[a-zA-Z0-9._]{1,30}$|^(https?://)?([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(/[^\s]*)?$"
+)
+
+
+class AccessRequest(BaseModel):
+    """Public access-request payload from the landing page form. Field aliases
+    match the camelCase keys the form sends."""
+
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    name: str = Field(..., min_length=1, max_length=120)
+    email: str = Field(..., min_length=1, max_length=180)
+    business_name: str = Field(
+        ..., alias="businessName", min_length=1, max_length=160
+    )
+    website_or_instagram: str = Field(
+        ..., alias="websiteOrInstagram", min_length=1, max_length=220
+    )
+    category: str = Field(..., min_length=1, max_length=40)
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email(cls, v: str) -> str:
+        if not _EMAIL_RE.match(v):
+            raise ValueError("Usá un email válido.")
+        return v
+
+    @field_validator("website_or_instagram")
+    @classmethod
+    def _validate_url(cls, v: str) -> str:
+        if not _URL_OR_IG_RE.match(v):
+            raise ValueError("Ingresá una URL válida o un @ de Instagram.")
+        return v
+
+    @field_validator("category")
+    @classmethod
+    def _validate_category(cls, v: str) -> str:
+        if v not in _ALLOWED_CATEGORIES:
+            raise ValueError("Elegí una categoría válida.")
+        return v
+
+
+@app.post(
+    "/access-request",
+    summary="Public access-request form (landing page)",
+    description=(
+        "Receives the access-request form submitted from the landing page and "
+        "fires a Telegram notification. No auth — public endpoint, rate-limited "
+        "to 5 requests per minute per IP."
+    ),
+    responses={
+        400: {"description": "Validation failed"},
+        429: {"description": "Rate limit exceeded"},
+    },
+    status_code=200,
+)
+@limiter.limit("5/minute")
+async def access_request(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=400, content={"error": "Completá todos los campos."}
+        )
+
+    try:
+        payload = AccessRequest.model_validate(body)
+    except ValidationError as exc:
+        # Surface the first user-facing message; deeper details go to logs only.
+        msg = "Completá todos los campos."
+        for err in exc.errors():
+            ctx_msg = err.get("msg") or ""
+            if ctx_msg and not ctx_msg.startswith("Value error, "):
+                msg = ctx_msg
+                break
+            if ctx_msg.startswith("Value error, "):
+                msg = ctx_msg.removeprefix("Value error, ")
+                break
+        return JSONResponse(status_code=400, content={"error": msg})
+
+    notify_access_request(
+        name=payload.name,
+        email=payload.email,
+        business_name=payload.business_name,
+        website_or_instagram=payload.website_or_instagram,
+        category=payload.category,
+    )
+    return {"ok": True}
 
 
 @app.post(
