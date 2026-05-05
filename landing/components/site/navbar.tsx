@@ -6,6 +6,12 @@ const navLinks = [
   { label: "Demo", href: "/#demo" },
 ]
 
+const APP_URL =
+  process.env.NEXT_PUBLIC_APP_URL ??
+  (process.env.NODE_ENV === "production"
+    ? "https://app.preciocompare.com"
+    : "http://localhost:8080")
+
 export function Navbar({ showAccessCta = true }: { showAccessCta?: boolean }) {
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-md">
@@ -29,6 +35,14 @@ export function Navbar({ showAccessCta = true }: { showAccessCta?: boolean }) {
         </nav>
 
         <div className="flex items-center gap-6">
+          <a
+            href={APP_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:text-primary"
+          >
+            Ingresar
+          </a>
           {showAccessCta ? (
             <Link
               href="/solicitar-acceso"
