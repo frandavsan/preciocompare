@@ -21,6 +21,8 @@ from .models import PaymentPlan, PricingResult
 from .platforms.vtex import extract_all_plans as vtex_extract_all_plans
 from .platforms.magento import fetch_all_plans as magento_fetch_all_plans
 from .platforms.monteshermanos import fetch_all_plans as montes_fetch_all_plans
+from .platforms.fravega import fetch_all_plans as fravega_fetch_all_plans
+from .platforms.megatone import fetch_all_plans as megatone_fetch_all_plans
 
 
 def _find_adapter(store_name: str):
@@ -83,6 +85,10 @@ async def fetch_plans_for_product(
             plans = await magento_fetch_all_plans(product.url, product.price)
         elif store.platform == "monteshermanos":
             plans = await montes_fetch_all_plans(product.url, product.price)
+        elif store.platform == "fravega":
+            plans = await fravega_fetch_all_plans(product.sku or "", product.price)
+        elif store.platform == "megatone":
+            plans = await megatone_fetch_all_plans(product.sku or "", product.price)
         else:
             plans = []
 

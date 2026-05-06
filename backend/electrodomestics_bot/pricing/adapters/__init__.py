@@ -18,8 +18,8 @@ from typing import Literal
 class PricingStore:
     """Configuration for a store in the pricing pipeline."""
     name: str
-    column: str                          # Excel column letter (E, F, G, H)
-    platform: Literal["vtex", "magento", "monteshermanos"]
+    column: str                          # Excel column letter (E, F, G, H, I, J)
+    platform: Literal["vtex", "magento", "monteshermanos", "fravega", "megatone"]
     base_url: str
     verify_ssl: bool = True
 
@@ -49,5 +49,17 @@ PRICING_STORES: list[PricingStore] = [
         column="H",
         platform="monteshermanos",
         base_url="https://www.monteshermanos.com.ar",
+    ),
+    PricingStore(
+        name="fravega",
+        column="I",
+        platform="fravega",
+        base_url="https://www.fravega.com",
+    ),
+    PricingStore(
+        name="megatone",
+        column="J",
+        platform="megatone",
+        base_url="https://www.megatone.net",
     ),
 ]

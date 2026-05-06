@@ -21,11 +21,11 @@ _SHEET_NAME = "Datos"
 _ANALYSIS_SHEET_NAMES = ("Analisis", "Análisis")
 _PRICE_ROW_LABEL = "precio"
 _DATA_ROW_START = 5
-_COL_CARD_LABEL = 1   # A
+_COL_CARD_LABEL = 1    # A
 _COL_COUNT = 2         # B
-_COL_DESCRIPTION = 9   # I
+_COL_DESCRIPTION = 11  # K — moved from I when Fravega/Megatone took columns I/J
 _DATA_COMMERCE_CELL = "C3"
-_ANALYSIS_COMMERCE_CELL = "K1"
+_ANALYSIS_COMMERCE_CELL = "O1"  # moved from K1 when FRAVEGA/MEGATONE took K1/M1
 
 
 def _find_price_row(ws) -> int | None:
