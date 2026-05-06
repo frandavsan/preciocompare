@@ -19,7 +19,9 @@ from pathlib import Path
 from typing import Optional
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-TEMPLATE_PATH = _PROJECT_ROOT / "excel_template.xlsx"
+# excel_template_v1.xlsx is kept alongside as a hand-rollback backup —
+# the active layout (Fravega in I, Megatone in J, descriptions in K) lives in v2.
+TEMPLATE_PATH = _PROJECT_ROOT / "excel_template_v2.xlsx"
 EXCELS_DIR = _PROJECT_ROOT / "excels"
 
 from .adapters import PRICING_STORES
