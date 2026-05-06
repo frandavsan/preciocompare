@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import openpyxl
+from openpyxl.styles import Font
 
 from .adapters import PRICING_STORES
 from .card_mapping import find_matching_plan, parse_template_row
@@ -26,6 +27,24 @@ _COL_COUNT = 2         # B
 _COL_DESCRIPTION = 11  # K — moved from I when Fravega/Megatone took columns I/J
 _DATA_COMMERCE_CELL = "C3"
 _ANALYSIS_COMMERCE_CELL = "O1"  # moved from K1 when FRAVEGA/MEGATONE took K1/M1
+
+# Rates ≥ 100% are flagged in red so the user can spot extreme con-interés
+# offers at a glance (e.g. Fravega's AmEx 18x at 116%).
+_HIGH_RATE_THRESHOLD = 1.0
+# ARGB hex: leading FF is the alpha channel (opaque). A 6-char "FF0000" is
+# read as ARGB "00FF0000" — alpha 0, fully transparent.
+_HIGH_RATE_COLOR = "FFFF0000"
+
+
+def _flag_high_rate(cell) -> None:
+    """Override the cell font color to red while preserving the template's
+    other font attributes (name, size, weight)."""
+    f = cell.font
+    cell.font = Font(
+        name=f.name, size=f.size, bold=f.bold, italic=f.italic,
+        vertAlign=f.vertAlign, underline=f.underline, strike=f.strike,
+        color=_HIGH_RATE_COLOR,
+    )
 
 
 def _find_price_row(ws) -> int | None:
@@ -159,7 +178,9 @@ def write_results(
                 if plan is None:
                     ws.cell(row.excel_row, col_idx, "-")
                 else:
-                    ws.cell(row.excel_row, col_idx, plan.interest_rate)
+                    cell = ws.cell(row.excel_row, col_idx, plan.interest_rate)
+                    if plan.interest_rate >= _HIGH_RATE_THRESHOLD:
+                        _flag_high_rate(cell)
                 cells_written += 1
 
         wb.save(output_path)
