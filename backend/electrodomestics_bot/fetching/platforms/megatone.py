@@ -3,6 +3,7 @@
 # See CLAUDE.md for the full architecture guideline.
 import asyncio
 import functools
+import logging
 import secrets
 from math import ceil
 from typing import Optional
@@ -11,6 +12,39 @@ from urllib.parse import quote
 from ..core import get_client, http_post, matches_query
 from ...models import Installment, ProductResult
 from ..adapters.base import StoreAdapter
+
+logger = logging.getLogger(__name__)
+
+# Megatone's retornarplanes endpoint rate-limits aggressively (HTTP 429 with
+# body "Demasiadas solicitudes. Intente nuevamente más tarde."). The pricing
+# pipeline already fires ~14 of these per product — search() must NOT also
+# fire its own 14 just to enrich Installment data; that doubles the burst
+# and reliably trips the limit. We serialize at sem=1 to keep one product's
+# sweep safely below the threshold.
+_PLANS_SEM = asyncio.Semaphore(1)
+_PLANS_RETRY_BACKOFF_SECONDS = 4.0
+
+
+# Doofinder's `highlight_installments` is a string like "12 x $23333 Sin Interés".
+_HIGHLIGHT_RE = __import__("re").compile(
+    r"(\d+)\s*x\s*\$\s*([\d.,]+)", __import__("re").IGNORECASE
+)
+
+
+def _parse_highlight_installment(text: str) -> Optional["Installment"]:
+    if not text or "Sin Inter" not in text:
+        return None
+    m = _HIGHLIGHT_RE.search(text)
+    if not m:
+        return None
+    try:
+        count = int(m.group(1))
+        amount = float(m.group(2).replace(".", "").replace(",", "."))
+    except ValueError:
+        return None
+    if count <= 1 or amount <= 0:
+        return None
+    return Installment(count=count, amount=amount, cards=[])
 
 
 class MegatoneAdapter(StoreAdapter):
@@ -113,14 +147,21 @@ class MegatoneAdapter(StoreAdapter):
             result = self._parse_product(p)
             if not check_shipping:
                 result.free_shipping = False
+            # Fast-mode installments: parse the headlined "12 x $23333 Sin
+            # Interés" label from Doofinder. Single tier per product, no card
+            # names — matches the convention of fast vs detail mode and avoids
+            # the rate-limited retornarplanes burst entirely in this path.
+            highlight = _parse_highlight_installment(p.get("highlight_installments") or "")
+            if highlight:
+                result.installments = [highlight]
             results.append(result)
             if result.price and result.sku and self._has_sin_interes(p):
                 eligible.append(result)
 
-        if eligible:
-            # Use a single representative SKU — the API returns the intersection of plans
-            # valid for ALL SKUs, which collapses to nothing with 3+ mixed products.
-            # Installment tiers are store-wide promotions; any eligible product reveals them.
+        if detail and eligible:
+            # Detail mode: ~14 retornarplanes calls to enumerate every card
+            # network and bank promo with full counts. Single representative
+            # SKU because the API returns the intersection across all SKUs.
             rep = max(eligible, key=lambda r: r.price)
             card_counts = await self._fetch_card_counts([rep.sku], rep.price)
             sorted_tiers = self._sorted_tiers(card_counts)
@@ -276,6 +317,10 @@ class MegatoneAdapter(StoreAdapter):
         return [(count, sorted(cards)) for count, cards in sorted(cards_by_count.items(), reverse=True)]
 
     async def _fetch_plans_batch(self, skus: list[str], capital: float, card_id: int, bank_id: int = 0) -> list[dict]:
+        """POST a single retornarplanes request. Capped by _PLANS_SEM and
+        retries once on HTTP 429 — the endpoint serves a plain-text "Demasiadas
+        solicitudes" body when rate-limited, which would otherwise blow up at
+        resp.json() and silently degrade to an empty resumen for the caller."""
         payload = {
             "IdTarjeta": card_id,
             "IdBanco": bank_id,
@@ -284,13 +329,41 @@ class MegatoneAdapter(StoreAdapter):
             "Capital": int(round(capital)),
             "Token": secrets.token_hex(32),
         }
-        try:
-            resp = await http_post(
-                self._plans_endpoint,
-                verify_ssl=self.verify_ssl,
-                json=payload,
-                headers={"Content-Type": "application/json; charset=utf-8", **self._origin_headers},
-            )
-            return resp.json().get("resumen", [])
-        except Exception:
-            return []
+        headers = {"Content-Type": "application/json; charset=utf-8", **self._origin_headers}
+
+        # Three attempts with exponential backoff. Megatone's 429 cooldown is
+        # measured in seconds and unpredictable, so 4s → 8s gives a single
+        # export a strong chance of fully completing even when called shortly
+        # after another burst.
+        for attempt in range(3):
+            try:
+                async with _PLANS_SEM:
+                    resp = await http_post(
+                        self._plans_endpoint,
+                        verify_ssl=self.verify_ssl,
+                        json=payload,
+                        headers=headers,
+                    )
+            except Exception as exc:
+                if attempt < 2:
+                    await asyncio.sleep(1.0 * (attempt + 1))
+                    continue
+                logger.warning("[megatone] retornarplanes card=%d bank=%d failed: %s", card_id, bank_id, exc)
+                return []
+
+            if resp.status_code == 429:
+                if attempt < 2:
+                    await asyncio.sleep(_PLANS_RETRY_BACKOFF_SECONDS * (attempt + 1))
+                    continue
+                logger.warning("[megatone] retornarplanes card=%d bank=%d rate-limited (429) after retries", card_id, bank_id)
+                return []
+            if not resp.is_success:
+                logger.warning("[megatone] retornarplanes card=%d bank=%d HTTP %d", card_id, bank_id, resp.status_code)
+                return []
+
+            try:
+                return resp.json().get("resumen", []) or []
+            except Exception as exc:
+                logger.warning("[megatone] retornarplanes card=%d bank=%d non-JSON body: %s", card_id, bank_id, exc)
+                return []
+        return []
