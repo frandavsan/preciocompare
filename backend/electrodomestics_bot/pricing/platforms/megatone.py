@@ -90,26 +90,28 @@ async def fetch_all_plans(sku: str, base_price: float) -> list[PaymentPlan]:
         ]),
     )
 
-    plans: list[PaymentPlan] = []
-    seen: set[tuple[str, str | None, int, bool]] = set()
+    # Keyed by (card_system, issuer, count, has_interest); duplicates resolve
+    # to the *lowest* interest_rate so an inferior late row can't shadow a
+    # better earlier one (same pattern as pricing/platforms/magento.py).
+    best: dict[tuple[str, str | None, int, bool], PaymentPlan] = {}
 
     def _emit(card_system: str, issuer: str | None, count: int, rate: float) -> None:
         if count <= 1:
             return
         has_interest = rate != 0
+        normalized_rate = round(rate, 6) if has_interest else 0.0
         key = (card_system, issuer, count, has_interest)
-        if key in seen:
+        existing = best.get(key)
+        if existing is not None and normalized_rate >= existing.interest_rate:
             return
-        seen.add(key)
-        amount = base_price * (1 + rate) / count
-        plans.append(PaymentPlan(
+        best[key] = PaymentPlan(
             card_system=card_system,
             card_issuer=issuer,
             installment_count=count,
             has_interest=has_interest,
-            interest_rate=round(rate, 6) if has_interest else 0.0,
-            amount_per_installment=round(amount, 2),
-        ))
+            interest_rate=normalized_rate,
+            amount_per_installment=round(base_price * (1 + rate) / count, 2),
+        )
 
     visa_sin_max = 0
     for (_, card_name), raw_plans in zip(adapter._CARD_CALLS, card_results):
@@ -157,6 +159,7 @@ async def fetch_all_plans(sku: str, base_price: float) -> list[PaymentPlan]:
             continue
         _emit(card_system, None, count, rate)
 
+    plans = list(best.values())
     plans.sort(key=lambda p: (
         p.card_system, p.card_issuer or "", p.installment_count, p.has_interest
     ))

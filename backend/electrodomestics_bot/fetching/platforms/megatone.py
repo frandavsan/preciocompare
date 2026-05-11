@@ -4,7 +4,9 @@
 import asyncio
 import functools
 import logging
+import re
 import secrets
+import time
 from math import ceil
 from typing import Optional
 from urllib.parse import quote
@@ -16,19 +18,21 @@ from ..adapters.base import StoreAdapter
 logger = logging.getLogger(__name__)
 
 # Megatone's retornarplanes endpoint rate-limits aggressively (HTTP 429 with
-# body "Demasiadas solicitudes. Intente nuevamente más tarde."). The pricing
-# pipeline already fires ~14 of these per product — search() must NOT also
-# fire its own 14 just to enrich Installment data; that doubles the burst
-# and reliably trips the limit. We serialize at sem=1 to keep one product's
-# sweep safely below the threshold.
+# body "Demasiadas solicitudes. Intente nuevamente más tarde."). Two layers
+# of throttling, both required:
+#   1. Semaphore(1) serializes one product's ~14-call sweep so we don't burst.
+#   2. _next_allowed_at is a shared cooldown timestamp. When any call sees a
+#      429, every subsequent acquirer waits past this timestamp before firing
+#      again. Without it, the 13 queued calls would each release the
+#      semaphore, sleep on their own retry, then re-fire during the same
+#      cooldown window and burn all 3 attempts each.
 _PLANS_SEM = asyncio.Semaphore(1)
 _PLANS_RETRY_BACKOFF_SECONDS = 4.0
+_next_allowed_at: float = 0.0
 
 
 # Doofinder's `highlight_installments` is a string like "12 x $23333 Sin Interés".
-_HIGHLIGHT_RE = __import__("re").compile(
-    r"(\d+)\s*x\s*\$\s*([\d.,]+)", __import__("re").IGNORECASE
-)
+_HIGHLIGHT_RE = re.compile(r"(\d+)\s*x\s*\$\s*([\d.,]+)", re.IGNORECASE)
 
 
 def _parse_highlight_installment(text: str) -> Optional["Installment"]:
@@ -317,10 +321,11 @@ class MegatoneAdapter(StoreAdapter):
         return [(count, sorted(cards)) for count, cards in sorted(cards_by_count.items(), reverse=True)]
 
     async def _fetch_plans_batch(self, skus: list[str], capital: float, card_id: int, bank_id: int = 0) -> list[dict]:
-        """POST a single retornarplanes request. Capped by _PLANS_SEM and
-        retries once on HTTP 429 — the endpoint serves a plain-text "Demasiadas
-        solicitudes" body when rate-limited, which would otherwise blow up at
-        resp.json() and silently degrade to an empty resumen for the caller."""
+        """POST a single retornarplanes request, serialized via _PLANS_SEM and
+        gated on a module-level cooldown timestamp so a 429 on one call pauses
+        the whole queued sweep instead of every caller retrying on its own
+        schedule. Three attempts with exponential backoff (4s → 8s)."""
+        global _next_allowed_at
         payload = {
             "IdTarjeta": card_id,
             "IdBanco": bank_id,
@@ -331,39 +336,46 @@ class MegatoneAdapter(StoreAdapter):
         }
         headers = {"Content-Type": "application/json; charset=utf-8", **self._origin_headers}
 
-        # Three attempts with exponential backoff. Megatone's 429 cooldown is
-        # measured in seconds and unpredictable, so 4s → 8s gives a single
-        # export a strong chance of fully completing even when called shortly
-        # after another burst.
         for attempt in range(3):
-            try:
-                async with _PLANS_SEM:
+            async with _PLANS_SEM:
+                # Honour any cooldown set by a sibling call that already saw a 429.
+                wait_for = _next_allowed_at - time.monotonic()
+                if wait_for > 0:
+                    await asyncio.sleep(wait_for)
+
+                try:
                     resp = await http_post(
                         self._plans_endpoint,
                         verify_ssl=self.verify_ssl,
                         json=payload,
                         headers=headers,
                     )
-            except Exception as exc:
-                if attempt < 2:
-                    await asyncio.sleep(1.0 * (attempt + 1))
-                    continue
-                logger.warning("[megatone] retornarplanes card=%d bank=%d failed: %s", card_id, bank_id, exc)
-                return []
+                except Exception as exc:
+                    if attempt < 2:
+                        _next_allowed_at = max(_next_allowed_at, time.monotonic() + 1.0 * (attempt + 1))
+                        continue
+                    logger.warning("[megatone] retornarplanes card=%d bank=%d failed: %s", card_id, bank_id, exc)
+                    return []
 
-            if resp.status_code == 429:
-                if attempt < 2:
-                    await asyncio.sleep(_PLANS_RETRY_BACKOFF_SECONDS * (attempt + 1))
-                    continue
-                logger.warning("[megatone] retornarplanes card=%d bank=%d rate-limited (429) after retries", card_id, bank_id)
-                return []
-            if not resp.is_success:
-                logger.warning("[megatone] retornarplanes card=%d bank=%d HTTP %d", card_id, bank_id, resp.status_code)
-                return []
+                if resp.status_code == 429:
+                    if attempt < 2:
+                        _next_allowed_at = max(
+                            _next_allowed_at,
+                            time.monotonic() + _PLANS_RETRY_BACKOFF_SECONDS * (attempt + 1),
+                        )
+                        continue
+                    logger.warning(
+                        "[megatone] retornarplanes card=%d bank=%d rate-limited (429) after retries",
+                        card_id, bank_id,
+                    )
+                    return []
+                if not resp.is_success:
+                    logger.warning("[megatone] retornarplanes card=%d bank=%d HTTP %d", card_id, bank_id, resp.status_code)
+                    return []
 
-            try:
-                return resp.json().get("resumen", []) or []
-            except Exception as exc:
-                logger.warning("[megatone] retornarplanes card=%d bank=%d non-JSON body: %s", card_id, bank_id, exc)
-                return []
+                try:
+                    return resp.json().get("resumen", []) or []
+                except Exception as exc:
+                    logger.warning("[megatone] retornarplanes card=%d bank=%d non-JSON body: %s", card_id, bank_id, exc)
+                    return []
         return []

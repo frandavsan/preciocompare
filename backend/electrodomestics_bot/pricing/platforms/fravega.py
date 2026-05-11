@@ -87,8 +87,9 @@ async def fetch_all_plans(sku: str, base_price: float) -> list[PaymentPlan]:
 
     raw_plans = (resp.get("data") or {}).get("plans") or []
 
-    plans: list[PaymentPlan] = []
-    seen: set[tuple[str, str | None, int, bool]] = set()
+    # Keyed by (card_system, issuer, count, has_interest); duplicates resolve
+    # to the lowest interest_rate (same pattern as pricing/platforms/magento.py).
+    best: dict[tuple[str, str | None, int, bool], PaymentPlan] = {}
 
     for plan in raw_plans:
         system_name = (plan.get("system") or {}).get("name", "").strip()
@@ -126,22 +127,21 @@ async def fetch_all_plans(sku: str, base_price: float) -> list[PaymentPlan]:
         else:
             interest_rate = 0.0
 
-        amount = base_price * factor
-
         key = (system_name, issuer, count, has_interest)
-        if key in seen:
+        existing = best.get(key)
+        if existing is not None and interest_rate >= existing.interest_rate:
             continue
-        seen.add(key)
 
-        plans.append(PaymentPlan(
+        best[key] = PaymentPlan(
             card_system=system_name,
             card_issuer=issuer,
             installment_count=count,
             has_interest=has_interest,
             interest_rate=interest_rate,
-            amount_per_installment=round(amount, 2),
-        ))
+            amount_per_installment=round(base_price * factor, 2),
+        )
 
+    plans = list(best.values())
     plans.sort(key=lambda p: (
         p.card_system, p.card_issuer or "", p.installment_count, p.has_interest
     ))

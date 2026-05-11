@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import re
 import time
@@ -315,6 +316,11 @@ _URL_OR_IG_RE = re.compile(
     r"^@[a-zA-Z0-9._]{1,30}$|^(https?://)?([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(/[^\s]*)?$"
 )
 
+# Sum of the form's per-field max_lengths is ~720 bytes; 4 KiB allows JSON
+# overhead and non-ASCII names without giving an unauthenticated caller room
+# to balloon the worker on every accepted request.
+_ACCESS_REQUEST_MAX_BYTES = 4096
+
 
 class AccessRequest(BaseModel):
     """Public access-request payload from the landing page form. Field aliases
@@ -370,9 +376,24 @@ class AccessRequest(BaseModel):
 )
 @limiter.limit("5/minute")
 async def access_request(request: Request):
+    # Bound the request before parsing — keeps a public, unauthenticated route
+    # from being used to coerce large allocations on every accepted hit.
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared = int(content_length)
+        except ValueError:
+            return JSONResponse(status_code=400, content={"error": "Solicitud inválida."})
+        if declared > _ACCESS_REQUEST_MAX_BYTES:
+            return JSONResponse(status_code=413, content={"error": "Solicitud demasiado grande."})
+
+    raw = await request.body()
+    if len(raw) > _ACCESS_REQUEST_MAX_BYTES:
+        return JSONResponse(status_code=413, content={"error": "Solicitud demasiado grande."})
+
     try:
-        body = await request.json()
-    except Exception:
+        body = json.loads(raw) if raw else {}
+    except ValueError:
         return JSONResponse(
             status_code=400, content={"error": "Completá todos los campos."}
         )
