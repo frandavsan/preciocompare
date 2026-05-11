@@ -8,6 +8,7 @@ at build time.
 
 import electrodomestics_bot.fetching.adapters  # noqa: F401  — avoid circular import
 from electrodomestics_bot.fetching.platforms.megatone import MegatoneAdapter
+from electrodomestics_bot.pricing.platforms import megatone as pricing_megatone
 
 from conftest import load_snapshot
 
@@ -21,6 +22,73 @@ class _TestAdapter(MegatoneAdapter):
 
 
 _adapter = _TestAdapter()
+
+
+class TestMegatoneEndpoints:
+    """Megatone's product page now calls the v2 RecursosWeb plans API."""
+
+    def test_plans_endpoint_uses_recursos_web_v2(self):
+        assert _adapter._plans_endpoint == (
+            "https://www.megatone.net/apirecursoswebv2/api/planes/retornarplanes"
+        )
+
+
+class _FakePricingMegatoneAdapter:
+    _CARD_CALLS = [
+        (5, "Visa"),
+        (3, "Mastercard"),
+        (2, "American Express"),
+        (6, "Cabal"),
+        (7, "NaranjaX"),
+    ]
+    _BANK_PROMOS = {
+        11: "BNA",
+        7: "Banco Galicia",
+        17: "BBVA",
+        72: "Banco Santander",
+    }
+
+    def __init__(self):
+        self.calls = []
+
+    async def _fetch_plans_batch(self, skus, capital, card_id, bank_id=0):
+        self.calls.append((card_id, bank_id))
+        return []
+
+
+class TestMegatonePricingFetchSelection:
+    async def test_current_template_path_uses_narrow_call_set(self, monkeypatch):
+        adapter = _FakePricingMegatoneAdapter()
+        monkeypatch.setattr(pricing_megatone, "_find_adapter", lambda: adapter)
+
+        await pricing_megatone.fetch_all_plans("SKU", 1000)
+
+        assert set(adapter.calls) == {
+            (5, 0),
+            (3, 0),
+            (7, 0),
+            (0, 0),
+            (5, 11),
+        }
+
+    async def test_full_sweep_keeps_all_card_and_bank_calls(self, monkeypatch):
+        adapter = _FakePricingMegatoneAdapter()
+        monkeypatch.setattr(pricing_megatone, "_find_adapter", lambda: adapter)
+
+        await pricing_megatone.fetch_full_plan_sweep("SKU", 1000)
+
+        assert set(adapter.calls) == {
+            (5, 0),
+            (3, 0),
+            (2, 0),
+            (6, 0),
+            (7, 0),
+            (0, 0),
+            (5, 11),
+            (5, 7),
+            (5, 17),
+            (5, 72),
+        }
 
 
 class TestMegatoneProductParsing:

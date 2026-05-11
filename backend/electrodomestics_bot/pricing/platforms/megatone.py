@@ -55,6 +55,17 @@ _COMPREHENSIVE_CARD_MAP: list[tuple[str, str]] = [
 # Card labels in the API that the website hides (e.g. NATIVA isn't shown anywhere).
 _COMPREHENSIVE_BLACKLIST: frozenset[str] = frozenset({"NATIVA"})
 
+# The active excel_template_v2 schema only has rows that can be populated by
+# Visa/Mastercard, NaranjaX, Mercado Pago, and Banco Nacion-specific Visa promos.
+# Keep the full sweep available below for the future "all plans" workbook, but
+# avoid paying for unused Megatone calls while the current schema is active.
+_CURRENT_TEMPLATE_CARD_NAMES: frozenset[str] = frozenset({
+    "Visa",
+    "Mastercard",
+    "NaranjaX",
+})
+_CURRENT_TEMPLATE_BANK_NAMES: frozenset[str] = frozenset({"BNA"})
+
 
 def _find_adapter() -> MegatoneAdapter | None:
     for adapter in ADAPTERS:
@@ -74,6 +85,22 @@ def _comprehensive_card(label: str) -> str | None:
 
 
 async def fetch_all_plans(sku: str, base_price: float) -> list[PaymentPlan]:
+    """Fetch Megatone plans needed by the current Excel template.
+
+    This is intentionally narrower than the full Megatone plan universe because
+    excel_template_v2 has no AmEx/Cabal/extra-bank rows to fill. When the workbook
+    schema changes to include every plan, switch the service to
+    fetch_full_plan_sweep() instead of re-discovering the endpoint behavior.
+    """
+    return await _fetch_selected_plans(
+        sku,
+        base_price,
+        card_names=_CURRENT_TEMPLATE_CARD_NAMES,
+        bank_names=_CURRENT_TEMPLATE_BANK_NAMES,
+    )
+
+
+async def fetch_full_plan_sweep(sku: str, base_price: float) -> list[PaymentPlan]:
     """
     Fetch sin- and con-interés payment plans for a Megatone SKU.
 
@@ -82,6 +109,16 @@ async def fetch_all_plans(sku: str, base_price: float) -> list[PaymentPlan]:
     promos that exceed the base Visa sin-interés count, plus Mercado Pago
     plans recovered from the comprehensive-call response.
     """
+    return await _fetch_selected_plans(sku, base_price, card_names=None, bank_names=None)
+
+
+async def _fetch_selected_plans(
+    sku: str,
+    base_price: float,
+    *,
+    card_names: frozenset[str] | None,
+    bank_names: frozenset[str] | None,
+) -> list[PaymentPlan]:
     if base_price <= 0 or not sku:
         return []
 
@@ -90,12 +127,21 @@ async def fetch_all_plans(sku: str, base_price: float) -> list[PaymentPlan]:
         return []
 
     skus = [sku]
-    bank_ids = list(adapter._BANK_PROMOS.keys())
+    card_calls = [
+        (cid, name)
+        for cid, name in adapter._CARD_CALLS
+        if card_names is None or name in card_names
+    ]
+    bank_ids = [
+        bid
+        for bid, name in adapter._BANK_PROMOS.items()
+        if bank_names is None or name in bank_names
+    ]
 
     card_results, comprehensive, bank_results = await asyncio.gather(
         asyncio.gather(*[
             adapter._fetch_plans_batch(skus, base_price, card_id=cid)
-            for cid, _ in adapter._CARD_CALLS
+            for cid, _ in card_calls
         ]),
         adapter._fetch_plans_batch(skus, base_price, card_id=0),
         asyncio.gather(*[
@@ -127,7 +173,7 @@ async def fetch_all_plans(sku: str, base_price: float) -> list[PaymentPlan]:
             amount_per_installment=round(base_price * (1 + rate) / count, 2),
         )
 
-    for (_, card_name), raw_plans in zip(adapter._CARD_CALLS, card_results):
+    for (_, card_name), raw_plans in zip(card_calls, card_results):
         for raw in raw_plans:
             try:
                 count = int(raw["cuotas"])

@@ -128,7 +128,7 @@ class MegatoneAdapter(StoreAdapter):
 
     @property
     def _plans_endpoint(self) -> str:
-        return f"{self.base_url}/apirecursosweb/api/planes/retornarplanes"
+        return f"{self.base_url}/apirecursoswebv2/api/planes/retornarplanes"
 
     @functools.cached_property
     def _origin_headers(self) -> dict:

@@ -485,9 +485,18 @@ Doofinder's v6 API enforces domain whitelisting: every request must include `Ori
 
 #### 27. Use a single representative SKU for `retornarplanes` — never call it per-product
 
+Megatone's current product page calls `retornarplanes` through the v2 RecursosWeb API:
+`/apirecursoswebv2/api/planes/retornarplanes`. The legacy
+`/apirecursosweb/api/planes/retornarplanes` path now returns 404.
+
 The `Productos` field in the `retornarplanes` POST payload accepts a list of SKU strings. However, sending a mixed list of eligible SKUs causes the API to return only the **intersection** of plans valid for all of them — which collapses to nothing when products have different plan eligibility. The correct approach is to send a single representative SKU (the highest-priced eligible product), then apply the resulting tiers to all eligible products.
 
 The calls fire in parallel via `asyncio.gather`: individual card network calls (`_CARD_CALLS`: Visa/5, Mastercard/3, AmEx/2, Cabal/6, NaranjaX/7), a Directo/debit call (18), a comprehensive fallback (0, for Mercado Pago), and `IdTarjeta=5` with each bank ID in `_BANK_PROMOS`.
+
+For the current pricing workbook (`excel_template_v2.xlsx`), the pricing layer
+uses a narrowed Megatone call set: Visa, Mastercard, NaranjaX, the comprehensive
+Mercado Pago fallback, and BNA/Nacion. The full sweep remains available as
+`fetch_full_plan_sweep()` for the future workbook that lists every plan.
 
 #### 28. Megatone installment amounts are calculated, not read from the API
 
