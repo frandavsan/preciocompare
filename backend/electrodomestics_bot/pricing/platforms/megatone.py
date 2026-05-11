@@ -31,6 +31,20 @@ _BANK_TO_ISSUER: dict[str, str] = {
     "Banco Santander": "santander",
 }
 
+# Issuer keys we fan generic Visa/Mastercard/AmEx/Cabal plans out to. Megatone's
+# generic-network promos are available to any cardholder regardless of issuer, so
+# we emit one copy per template-relevant issuer. Bank-specific calls then override
+# via the lowest-rate dedup when they offer a better deal.
+_BANK_EXPAND_ISSUERS: frozenset[str] = frozenset({
+    "macro", "nacion", "galicia", "bbva", "santander", "hipotecario",
+})
+
+# Card systems that banks issue — the only ones we fan out. Cabal is bank-issued
+# in Argentina (Cabal is owned by a consortium of Argentine banks).
+_BANK_EXPANDABLE_CARDS: frozenset[str] = frozenset({
+    "Visa", "Mastercard", "American Express", "Cabal",
+})
+
 # Comprehensive-call card name → canonical PaymentPlan card_system.
 # Only entries that are NOT covered by a dedicated _CARD_CALLS slot belong here —
 # the comprehensive call understates counts for cards that have one.
@@ -113,7 +127,6 @@ async def fetch_all_plans(sku: str, base_price: float) -> list[PaymentPlan]:
             amount_per_installment=round(base_price * (1 + rate) / count, 2),
         )
 
-    visa_sin_max = 0
     for (_, card_name), raw_plans in zip(adapter._CARD_CALLS, card_results):
         for raw in raw_plans:
             try:
@@ -121,12 +134,19 @@ async def fetch_all_plans(sku: str, base_price: float) -> list[PaymentPlan]:
                 rate = float(raw.get("tasaDirecta", 0) or 0) / 100  # API returns percent, not decimal
             except (KeyError, TypeError, ValueError):
                 continue
+            # Generic plan (no issuer) goes in for the issuer-agnostic template
+            # rows; for bank-issued networks we also emit an issuer-tagged copy
+            # per expandable issuer so MACRO/NACION/GALICIA/etc. rows can match
+            # generic Visa/MC promos. The bank-specific calls below will
+            # overwrite with a lower rate when the bank actually beats generic.
             _emit(card_name, None, count, rate)
-            if card_name == "Visa" and rate == 0 and count > visa_sin_max:
-                visa_sin_max = count
+            if card_name in _BANK_EXPANDABLE_CARDS:
+                for issuer in _BANK_EXPAND_ISSUERS:
+                    _emit(card_name, issuer, count, rate)
 
-    # Bank-promo Visa rows: emit only when they beat the base Visa sin-interés
-    # count, mirroring the website. Bank promos in this dataset are sin-interés.
+    # Bank-promo rows from dedicated retornarplanes calls (IdTarjeta=5 + bank).
+    # Lowest-rate dedup ensures these only stick when they beat the fanned-out
+    # generic Visa copy — no need for a separate count-vs-base filter.
     for bank_id, raw_plans in zip(bank_ids, bank_results):
         bank_name = adapter._BANK_PROMOS.get(bank_id, "")
         issuer = _BANK_TO_ISSUER.get(bank_name)
@@ -138,11 +158,7 @@ async def fetch_all_plans(sku: str, base_price: float) -> list[PaymentPlan]:
                 rate = float(raw.get("tasaDirecta", 0) or 0) / 100  # API returns percent, not decimal
             except (KeyError, TypeError, ValueError):
                 continue
-            if rate != 0:
-                continue
-            if count <= visa_sin_max:
-                continue
-            _emit("Visa", issuer, count, 0.0)
+            _emit("Visa", issuer, count, rate)
 
     # Comprehensive (IdTarjeta=0) backfills cards without a dedicated call.
     # Only used for Mercado Pago today — counts for cards with dedicated calls
